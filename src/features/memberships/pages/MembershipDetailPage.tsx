@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getMembership, recordMembershipUsage, renewMembership } from '../../../api/memberships';
+import { getBranches } from '../../../api/branches';
 import { useAuth } from '../../../auth/hooks/useAuth';
 import { formatCurrency } from '../../../utils/money';
 import type { Membership, MembershipUsage } from '../../../types/common';
+import type { Branch } from '../../../types/crm';
 
 export default function MembershipDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -16,6 +18,9 @@ export default function MembershipDetailPage() {
   const [useCredits, setUseCredits] = useState(1);
   const [useNotes, setUseNotes] = useState('');
   const [serviceDetails, setServiceDetails] = useState('');
+  const [usedAtBranchId, setUsedAtBranchId] = useState('');
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [renewing, setRenewing] = useState(false);
   const [renewPrice, setRenewPrice] = useState('0');
@@ -42,22 +47,44 @@ export default function MembershipDetailPage() {
     });
   }, [id]);
 
+  useEffect(() => {
+    setBranchesLoading(true);
+    getBranches({ all: user?.role === 'admin' }).then((r) => {
+      setBranchesLoading(false);
+      if (r.success && r.branches?.length) {
+        setBranches(r.branches);
+        setUsedAtBranchId((prev) => {
+          if (prev) return prev;
+          if (user?.role === 'vendor' && user?.branchId) return String(user.branchId);
+          if (r.branches!.length === 1) return r.branches![0].id;
+          return '';
+        });
+      } else {
+        setBranches(r.success ? [] : []);
+      }
+    });
+  }, [user?.role, user?.branchId]);
+
   async function handleUse(e: React.FormEvent) {
     e.preventDefault();
     if (!id || !membership) return;
+    if (!usedAtBranchId) {
+      setError('Please select the branch where credits are being used.');
+      return;
+    }
     const remaining = (membership.remainingCredits ?? membership.totalCredits - membership.usedCredits);
     if (useCredits > remaining) {
       setError(`Only ${remaining} credit(s) remaining.`);
       return;
     }
-    const isOtherBranch = Boolean(user?.branchId && membership.soldAtBranchId && String(user.branchId) !== String(membership.soldAtBranchId));
+    const isOtherBranch = Boolean(membership.soldAtBranchId && String(usedAtBranchId) !== String(membership.soldAtBranchId));
     if (isOtherBranch && !serviceDetails.trim()) {
       setError('Please enter service/visit details when using a package from another branch.');
       return;
     }
     setSubmitting(true);
     setError('');
-    const res = await recordMembershipUsage(id, { creditsUsed: useCredits, notes: useNotes, serviceDetails: serviceDetails.trim() || undefined });
+    const res = await recordMembershipUsage(id, { creditsUsed: useCredits, notes: useNotes, serviceDetails: serviceDetails.trim() || undefined, usedAtBranchId });
     setSubmitting(false);
     if (res.success) {
       getMembership(id).then((r) => {
@@ -211,6 +238,22 @@ export default function MembershipDetailPage() {
                 <p className="membership-use-hint">Sold at <strong>{membership!.soldAtBranch}</strong>. Enter service details below.</p>
               )}
               {error && <div className="auth-error">{error}</div>}
+              <label>
+                <span>Branch (used at) <strong>*</strong></span>
+                <select
+                  value={usedAtBranchId}
+                  onChange={(e) => setUsedAtBranchId(e.target.value)}
+                  required
+                  disabled={branchesLoading}
+                  className="membership-use-branch-select"
+                  aria-label="Branch where credits are used"
+                >
+                  <option value="">{branchesLoading ? 'Loading branches…' : 'Select branch'}</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </label>
               <label>
                 <span>Credits to use</span>
                 <input type="number" min={1} max={remaining} value={useCredits} onChange={(e) => setUseCredits(Number(e.target.value))} />

@@ -1,5 +1,8 @@
 export const APP_NAME = 'Kally Threading – Multi-Branch CRM';
 
+/** Logo used on login and in app nav (sidebar/topbar). File: public/images/Kally-Logo (1).webp */
+export const LOGO_URL = '/images/Kally-Logo%20(1).webp';
+
 export const ROUTES = {
   login: '/login',
   forgotPassword: '/forgot-password',

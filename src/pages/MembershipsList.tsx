@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { getMemberships, createMembership } from '../api/memberships';
+import { useEffect, useMemo, useState } from 'react';
+import { getMemberships, createMembership, importMemberships, type ImportRow } from '../api/memberships';
 import { getCustomers } from '../api/customers';
 import { getBranches } from '../api/branches';
 import { getPackages } from '../api/packages';
@@ -19,6 +19,8 @@ export default function MembershipsList() {
   const [packages, setPackages] = useState<PackageItem[]>([]);
   const [branchId, setBranchId] = useState(searchParams.get('branchId') || '');
   const [status, setStatus] = useState(searchParams.get('status') || '');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -33,44 +35,184 @@ export default function MembershipsList() {
   const [createDiscountAmount, setCreateDiscountAmount] = useState('');
   const [createPackageExpiry, setCreatePackageExpiry] = useState('');
   const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ imported: number; createdCustomers: number; errors: { row: number; message: string }[] } | null>(null);
   const basePath = user?.role === 'admin' ? '/admin' : '/vendor';
   const isAdmin = user?.role === 'admin';
   const PAGE_SIZE = 10;
 
-  const selectedPackage = packages.find((p) => p.id === createPackageId);
+  const selectedPackage = useMemo(() => packages.find((p) => p.id === createPackageId), [packages, createPackageId]);
 
-  const searchLower = searchQuery.trim().toLowerCase();
-  const filteredMemberships = searchLower
-    ? memberships.filter((m) => {
-        const customerName = (m.customer?.name ?? '').toLowerCase();
-        const customerPhone = (m.customer?.phone ?? '').toLowerCase();
-        const customerEmail = (m.customer?.email ?? '').toLowerCase();
-        const typeName = (m.typeName ?? '').toLowerCase();
-        const soldAt = (m.soldAtBranch ?? '').toLowerCase();
-        const statusStr = (m.status ?? '').toLowerCase();
-        const purchaseDate = m.purchaseDate ? new Date(m.purchaseDate).toLocaleDateString().toLowerCase() : '';
-        const expiryDate = m.expiryDate ? new Date(m.expiryDate).toLocaleDateString().toLowerCase() : '';
-        return (
-          customerName.includes(searchLower) ||
-          customerPhone.includes(searchLower) ||
-          customerEmail.includes(searchLower) ||
-          typeName.includes(searchLower) ||
-          soldAt.includes(searchLower) ||
-          statusStr.includes(searchLower) ||
-          purchaseDate.includes(searchLower) ||
-          expiryDate.includes(searchLower)
-        );
-      })
-    : memberships;
-
-  const totalFiltered = filteredMemberships.length;
-  const totalPages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE));
-  const currentPage = Math.min(Math.max(1, page), totalPages);
-  const paginatedMemberships = filteredMemberships.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const { filteredMemberships, totalFiltered, totalPages, currentPage, paginatedMemberships } = useMemo(() => {
+    const searchLower = searchQuery.trim().toLowerCase();
+    const filteredBySearch = searchLower
+      ? memberships.filter((m) => {
+          const customerName = (m.customer?.name ?? '').toLowerCase();
+          const customerPhone = (m.customer?.phone ?? '').toLowerCase();
+          const customerEmail = (m.customer?.email ?? '').toLowerCase();
+          const typeName = (m.typeName ?? '').toLowerCase();
+          const soldAt = (m.soldAtBranch ?? '').toLowerCase();
+          const statusStr = (m.status ?? '').toLowerCase();
+          const purchaseDate = m.purchaseDate ? new Date(m.purchaseDate).toLocaleDateString().toLowerCase() : '';
+          const expiryDate = m.expiryDate ? new Date(m.expiryDate).toLocaleDateString().toLowerCase() : '';
+          return (
+            customerName.includes(searchLower) ||
+            customerPhone.includes(searchLower) ||
+            customerEmail.includes(searchLower) ||
+            typeName.includes(searchLower) ||
+            soldAt.includes(searchLower) ||
+            statusStr.includes(searchLower) ||
+            purchaseDate.includes(searchLower) ||
+            expiryDate.includes(searchLower)
+          );
+        })
+      : memberships;
+    const filtered =
+      !dateFrom && !dateTo
+        ? filteredBySearch
+        : filteredBySearch.filter((m) => {
+            const p = m.purchaseDate ? new Date(m.purchaseDate).getTime() : 0;
+            if (dateFrom && p < new Date(dateFrom + 'T00:00:00').getTime()) return false;
+            if (dateTo && p > new Date(dateTo + 'T23:59:59').getTime()) return false;
+            return true;
+          });
+    const total = filtered.length;
+    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const current = Math.min(Math.max(1, page), pages);
+    const paginated = filtered.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
+    return {
+      filteredMemberships: filtered,
+      totalFiltered: total,
+      totalPages: pages,
+      currentPage: current,
+      paginatedMemberships: paginated,
+    };
+  }, [memberships, searchQuery, dateFrom, dateTo, page, PAGE_SIZE]);
 
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, branchId, status]);
+  }, [searchQuery, branchId, status, dateFrom, dateTo]);
+
+  function escapeCsvCell(value: string | number): string {
+    const s = String(value ?? '').replace(/"/g, '""');
+    return /[,"\n\r]/.test(s) ? `"${s}"` : s;
+  }
+
+  function exportToCsv() {
+    const headers = ['Customer', 'Phone', 'Email', 'Total credits', 'Used', 'Remaining', 'Package price', 'Sold at', 'Purchase date', 'Expiry', 'Status'];
+    const rows = filteredMemberships.map((m) => {
+      const remaining = m.remainingCredits ?? m.totalCredits - m.usedCredits;
+      const priceStr = m.packagePrice != null
+        ? (m.discountAmount != null && m.discountAmount > 0
+          ? `${formatCurrency((m.packagePrice ?? 0) - (m.discountAmount ?? 0))} (${formatCurrency(m.discountAmount)} off)`
+          : formatCurrency(m.packagePrice))
+        : '—';
+      return [
+        m.customer?.name ?? '—',
+        m.customer?.phone ?? '—',
+        m.customer?.email ?? '—',
+        m.totalCredits,
+        m.usedCredits,
+        remaining,
+        priceStr,
+        m.soldAtBranch ?? '—',
+        m.purchaseDate ? new Date(m.purchaseDate).toLocaleDateString() : '—',
+        m.expiryDate ? new Date(m.expiryDate).toLocaleDateString() : '—',
+        m.status ?? '—',
+      ].map(escapeCsvCell);
+    });
+    const csv = [headers.map(escapeCsvCell).join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `memberships-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function parseCsvLine(line: string): string[] {
+    const out: string[] = [];
+    let i = 0;
+    while (i < line.length) {
+      if (line[i] === '"') {
+        i++;
+        let cell = '';
+        while (i < line.length) {
+          if (line[i] === '"' && line[i + 1] === '"') { cell += '"'; i += 2; continue; }
+          if (line[i] === '"') { i++; break; }
+          cell += line[i++];
+        }
+        out.push(cell);
+      } else {
+        let cell = '';
+        while (i < line.length && line[i] !== ',') cell += line[i++];
+        out.push(cell.trim());
+        if (line[i] === ',') i++;
+      }
+    }
+    return out;
+  }
+
+  function csvToImportRows(text: string): ImportRow[] {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length < 2) return [];
+    const headers = parseCsvLine(lines[0]).map((h) => h.trim());
+    const get = (row: string[], name: string) => {
+      const i = headers.findIndex((h) => h.toLowerCase() === name.toLowerCase());
+      return i >= 0 ? row[i] ?? '' : '';
+    };
+    const out: ImportRow[] = [];
+    for (let r = 1; r < lines.length; r++) {
+      const cells = parseCsvLine(lines[r]);
+      const customerName = get(cells, 'Customer') || get(cells, 'customerName');
+      const customerPhone = get(cells, 'Phone') || get(cells, 'customerPhone');
+      const customerEmail = get(cells, 'Email') || get(cells, 'customerEmail');
+      const totalCreditsRaw = get(cells, 'Total credits') || get(cells, 'totalCredits');
+      const soldAtBranch = get(cells, 'Sold at') || get(cells, 'soldAtBranch') || get(cells, 'Branch');
+      const purchaseDate = get(cells, 'Purchase date') || get(cells, 'purchaseDate');
+      const expiryDate = get(cells, 'Expiry') || get(cells, 'expiryDate');
+      let packagePrice: number | undefined;
+      const priceStr = get(cells, 'Package price') || get(cells, 'packagePrice');
+      if (priceStr && priceStr !== '—' && priceStr !== '-') {
+        const num = parseFloat(priceStr.replace(/[$,]/g, '').trim());
+        if (!Number.isNaN(num)) packagePrice = num;
+      }
+      const totalCredits = parseInt(totalCreditsRaw, 10) || 0;
+      if (!customerName.trim() && !customerPhone.trim()) continue;
+      out.push({
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim(),
+        customerEmail: customerEmail.trim() || undefined,
+        totalCredits: totalCredits || 1,
+        soldAtBranch: soldAtBranch.trim(),
+        purchaseDate: purchaseDate.trim() || undefined,
+        expiryDate: expiryDate.trim() || undefined,
+        packagePrice,
+      });
+    }
+    return out;
+  }
+
+  async function handleImportFile(file: File) {
+    setImportResult(null);
+    setError('');
+    const text = await file.text();
+    const rows = csvToImportRows(text);
+    if (rows.length === 0) {
+      setError('No valid rows to import. CSV must have a header row with Customer, Phone, Sold at, Total credits (and optionally Email, Purchase date, Expiry, Package price).');
+      return;
+    }
+    setImporting(true);
+    const res = await importMemberships(rows);
+    setImporting(false);
+    if (res.success && res.imported != null) {
+      setImportResult({ imported: res.imported, createdCustomers: res.createdCustomers ?? 0, errors: res.errors ?? [] });
+      getMemberships({ branchId: branchId || undefined, status: status || undefined }).then((r) => {
+        if (r.success && 'memberships' in r) setMemberships((r as { memberships: Membership[] }).memberships);
+      });
+    } else setError(res.message || 'Import failed.');
+  }
 
   useEffect(() => {
     if (isAdmin) getBranches().then((r) => r.success && r.branches && setBranches(r.branches || []));
@@ -102,22 +244,27 @@ export default function MembershipsList() {
       setError('Customer and total credits are required.');
       return;
     }
-    setCreateSubmitting(true);
-    const pkgPrice = createPackageId && selectedPackage
-      ? (createPackagePrice !== '' ? Number(createPackagePrice) : selectedPackage.price)
-      : undefined;
-    const discount = createDiscountAmount !== '' ? Number(createDiscountAmount) : undefined;
-    if (pkgPrice != null && discount != null && (discount < 0 || discount > pkgPrice)) {
-      setError('Discount must be between 0 and total price.');
-      setCreateSubmitting(false);
+    if (!createPackageId || !selectedPackage) {
+      setError('Package is required. Please select a package from the list.');
       return;
     }
+    const pkgPrice = createPackagePrice !== '' ? Number(createPackagePrice) : selectedPackage.price;
+    if (Number.isNaN(pkgPrice) || pkgPrice < 0) {
+      setError('Package price is required and must be 0 or greater.');
+      return;
+    }
+    const discount = createDiscountAmount !== '' ? Number(createDiscountAmount) : undefined;
+    if (discount != null && (discount < 0 || discount > pkgPrice)) {
+      setError('Discount must be between 0 and total price.');
+      return;
+    }
+    setCreateSubmitting(true);
     const res = await createMembership({
       customerId: createCustomerId,
       totalCredits: credits,
       soldAtBranchId: isAdmin ? createSoldAtBranchId || undefined : undefined,
       expiryDate: createExpiryDate || undefined,
-      customerPackage: selectedPackage?.name,
+      customerPackage: selectedPackage.name,
       customerPackagePrice: pkgPrice,
       customerPackageExpiry: createPackageExpiry || undefined,
       discountAmount: discount,
@@ -137,11 +284,108 @@ export default function MembershipsList() {
   }
 
   return (
-    <div className="dashboard-content">
+    <div className="dashboard-content memberships-page">
       <header className="page-hero">
         <h1 className="page-hero-title">Memberships</h1>
         <p className="page-hero-subtitle">Assign memberships to customers. Set package and expiry here. View list below.</p>
       </header>
+
+      <section className="content-card memberships-search-card">
+        <label className="memberships-search-label" htmlFor="memberships-search-input">
+          Search memberships
+        </label>
+        <input
+          id="memberships-search-input"
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Customer name, phone, email, package, branch, status, date…"
+          className="memberships-search-input"
+          autoComplete="off"
+          aria-label="Search memberships by customer, phone, package, branch, status or date"
+        />
+        <div className="memberships-search-meta">
+          <div className="memberships-date-filters">
+            <label className="memberships-date-label">
+              <span className="memberships-date-label-text">From</span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="memberships-date-input"
+                aria-label="Filter from date (purchase date)"
+              />
+            </label>
+            <label className="memberships-date-label">
+              <span className="memberships-date-label-text">To</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="memberships-date-input"
+                aria-label="Filter to date (purchase date)"
+              />
+            </label>
+          </div>
+          {isAdmin && (
+            <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="memberships-filter-select" aria-label="Filter by branch">
+              <option value="">All branches</option>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          )}
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className="memberships-filter-select" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="used">Used</option>
+            <option value="expired">Expired</option>
+          </select>
+          {totalFiltered > 0 && (
+            <span className="memberships-search-count text-muted">
+              {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, totalFiltered)} of {totalFiltered}
+            </span>
+          )}
+          <button
+            type="button"
+            className="memberships-export-btn"
+            onClick={exportToCsv}
+            disabled={totalFiltered === 0}
+            title={totalFiltered === 0 ? 'No data to export' : 'Export filtered results to CSV/Excel'}
+          >
+            Export to CSV / Excel
+          </button>
+          <label className="memberships-import-btn">
+            <input
+              type="file"
+              accept=".csv,.txt,text/csv,application/csv"
+              className="memberships-import-input"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleImportFile(f);
+                e.target.value = '';
+              }}
+              disabled={importing}
+            />
+            {importing ? 'Importing…' : 'Import from CSV'}
+          </label>
+        </div>
+        {importResult && (
+          <div className="memberships-import-result" role="status">
+            <p className="memberships-import-success">
+              Imported <strong>{importResult.imported}</strong> membership{importResult.imported !== 1 ? 's' : ''}
+              {importResult.createdCustomers > 0 && `, created ${importResult.createdCustomers} new customer(s).`}
+            </p>
+            {importResult.errors.length > 0 && (
+              <ul className="memberships-import-errors">
+                {importResult.errors.slice(0, 10).map((err, i) => (
+                  <li key={i}>Row {err.row}: {err.message}</li>
+                ))}
+                {importResult.errors.length > 10 && <li>… and {importResult.errors.length - 10} more errors.</li>}
+              </ul>
+            )}
+          </div>
+        )}
+      </section>
+
       <section className="content-card">
         <h2 className="page-section-title" style={{ marginTop: 0 }}>Create new membership</h2>
         <p className="page-hero-subtitle" style={{ marginBottom: '1rem' }}>Select a customer and set credits. Optionally set package and expiry for the customer.</p>
@@ -179,11 +423,11 @@ export default function MembershipsList() {
               <input type="date" value={createExpiryDate} onChange={(e) => setCreateExpiryDate(e.target.value)} />
             </label>
             <hr style={{ margin: '1rem 0', border: 'none', borderTop: '1px solid var(--theme-border)' }} />
-            <p style={{ fontSize: '0.9rem', color: 'var(--theme-text)', marginBottom: '0.75rem' }}>Customer package (optional — shown on customer list)</p>
+            <p style={{ fontSize: '0.9rem', color: 'var(--theme-text)', marginBottom: '0.75rem' }}>Package (required)</p>
             <label>
-              <span>Package</span>
-              <select value={createPackageId} onChange={(e) => setCreatePackageId(e.target.value)}>
-                <option value="">— None</option>
+              <span>Package <strong>*</strong></span>
+              <select value={createPackageId} onChange={(e) => setCreatePackageId(e.target.value)} required>
+                <option value="">— Select package</option>
                 {packages.map((p) => (
                   <option key={p.id} value={p.id}>{p.name} — {formatCurrency(p.price)}</option>
                 ))}
@@ -192,10 +436,10 @@ export default function MembershipsList() {
             {createPackageId && selectedPackage && (
               <>
                 <label>
-                  <span>Total price</span>
+                  <span>Total price <strong>*</strong></span>
                   <span className="input-prefix-dollar">
                     <span className="input-prefix-symbol" aria-hidden>$</span>
-                    <input type="number" min={0} step="0.01" value={createPackagePrice} onChange={(e) => setCreatePackagePrice(e.target.value)} />
+                    <input type="number" min={0} step="0.01" value={createPackagePrice} onChange={(e) => setCreatePackagePrice(e.target.value)} required />
                   </span>
                 </label>
                 <label>
@@ -223,45 +467,12 @@ export default function MembershipsList() {
       </section>
       <section className="content-card">
         <h2 className="page-section-title">Membership list</h2>
-        <div className="vendors-filters" style={{ marginBottom: '1rem' }}>
-          {isAdmin && (
-            <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="filter-btn">
-              <option value="">All branches</option>
-              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-          )}
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="filter-btn">
-            <option value="">All statuses</option>
-            <option value="active">Active</option>
-            <option value="used">Used</option>
-            <option value="expired">Expired</option>
-          </select>
-        </div>
-        <div style={{ marginBottom: '1rem' }}>
-          <label className="search-label-inline" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <span className="text-muted">Search</span>
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Customer, phone, package, branch, status, date…"
-              className="filter-btn"
-              style={{ minWidth: '220px', padding: '0.4rem 0.6rem' }}
-              aria-label="Search memberships"
-            />
-          </label>
-          {totalFiltered > 0 && (
-            <p className="customers-showing-count text-muted">
-              Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, totalFiltered)} of {totalFiltered} membership{totalFiltered !== 1 ? 's' : ''}
-            </p>
-          )}
-        </div>
         {loading ? (
           <div className="vendors-loading"><div className="spinner" /><span>Loading...</span></div>
         ) : memberships.length === 0 ? (
           <p className="vendors-empty">No memberships found.</p>
         ) : filteredMemberships.length === 0 ? (
-          <p className="vendors-empty">No memberships match your search.</p>
+          <p className="vendors-empty">No memberships match your search or date filter.</p>
         ) : (
           <>
             <div className="data-table-wrap">
