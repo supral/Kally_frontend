@@ -42,6 +42,19 @@ export async function createMembership(data: {
   return apiRequest<{ membership: Membership }>('/memberships', { method: 'POST', body: JSON.stringify(data) });
 }
 
+export async function bulkDeleteMemberships(ids: string[]): Promise<{
+  success: boolean;
+  deleted?: { memberships: number; membershipUsages: number; internalSettlements: number };
+  message?: string;
+}> {
+  const r = await apiRequest<{ deleted: { memberships: number; membershipUsages: number; internalSettlements: number } }>('/memberships/bulk-delete', {
+    method: 'POST',
+    body: JSON.stringify({ ids, confirm: 'DELETE_SELECTED_MEMBERSHIPS' }),
+  });
+  const rr = r as unknown as { success: boolean; deleted?: { memberships: number; membershipUsages: number; internalSettlements: number }; message?: string };
+  return rr.success ? { success: true, deleted: rr.deleted } : { success: false, message: rr.message };
+}
+
 export type ImportRow = {
   customerName: string;
   customerPhone: string;

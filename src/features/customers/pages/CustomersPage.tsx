@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getCustomers, createCustomer } from '../../../api/customers';
+import { bulkDeleteCustomers, getCustomers, createCustomer } from '../../../api/customers';
 import { getBranches } from '../../../api/branches';
 import { getSettings } from '../../../api/settings';
 import { useAuth } from '../../../auth/hooks/useAuth';
@@ -26,6 +26,12 @@ export default function CustomersPage() {
   const [importResult, setImportResult] = useState<{ ok: number; fail: number; skipped: number } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [showImportButton, setShowImportButton] = useState(true);
+  const [showCustomerDeleteToAdmin, setShowCustomerDeleteToAdmin] = useState(true);
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkDeleteMessage, setBulkDeleteMessage] = useState('');
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [bulkDeleteConfirmText, setBulkDeleteConfirmText] = useState('');
   const isAdmin = user?.role === 'admin';
   const PAGE_SIZE = 10;
   const basePath = isAdmin ? '/admin' : '/vendor';
@@ -91,8 +97,83 @@ export default function CustomersPage() {
       if (r.success && r.settings && typeof r.settings.showImportButton === 'boolean') {
         setShowImportButton(r.settings.showImportButton);
       }
+      if (r.success && r.settings && typeof (r.settings as { showCustomerDeleteToAdmin?: boolean }).showCustomerDeleteToAdmin === 'boolean') {
+        setShowCustomerDeleteToAdmin((r.settings as { showCustomerDeleteToAdmin: boolean }).showCustomerDeleteToAdmin);
+      }
     });
   }, []);
+
+  const canBulkDelete = isAdmin && showCustomerDeleteToAdmin;
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedCustomerIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedCustomerIds(new Set()), []);
+
+  const selectAllFiltered = useCallback(() => {
+    setSelectedCustomerIds(new Set(filteredCustomers.map((c) => String(c.id))));
+  }, [filteredCustomers]);
+
+  // We intentionally do NOT render a header checkbox. Bulk selection is controlled via the "Select all" button.
+
+  const openBulkDeleteDialog = useCallback(() => {
+    if (!canBulkDelete) return;
+    if (selectedCustomerIds.size === 0) return;
+    setBulkDeleteConfirmText('');
+    setShowBulkDeleteDialog(true);
+  }, [canBulkDelete, selectedCustomerIds.size]);
+
+  const confirmBulkDelete = useCallback(async () => {
+    if (!canBulkDelete) return;
+    const ids = Array.from(selectedCustomerIds);
+    if (ids.length === 0) return;
+    if (bulkDeleteConfirmText.trim().toUpperCase() !== 'DELETE') return;
+    setShowBulkDeleteDialog(false);
+    setBulkDeleting(true);
+    setBulkDeleteMessage('');
+    setError('');
+    const BATCH_SIZE = 5000;
+    let totalDeletedCustomers = 0;
+    let totalSkippedMemberships = 0;
+    let totalDeletedAppointments = 0;
+    let totalDeletedLoyaltyAccounts = 0;
+    let totalDeletedLoyaltyTxns = 0;
+
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      setBulkDeleteMessage(`Deleting ${Math.min(i + batch.length, ids.length)} of ${ids.length}…`);
+      // eslint-disable-next-line no-await-in-loop
+      const r = await bulkDeleteCustomers(batch);
+      if (!r.success) {
+        setBulkDeleting(false);
+        setError(r.message || 'Failed to delete selected customers.');
+        return;
+      }
+      totalDeletedCustomers += r.deleted?.customers ?? 0;
+      totalDeletedAppointments += r.deleted?.appointments ?? 0;
+      totalDeletedLoyaltyAccounts += r.deleted?.loyaltyAccounts ?? 0;
+      totalDeletedLoyaltyTxns += r.deleted?.loyaltyTransactions ?? 0;
+      totalSkippedMemberships += r.skippedWithMemberships?.length ?? 0;
+    }
+
+    setBulkDeleting(false);
+    setBulkDeleteMessage(
+      `Deleted ${totalDeletedCustomers} customer(s) (appointments: ${totalDeletedAppointments}, loyalty: ${totalDeletedLoyaltyTxns}). Skipped ${totalSkippedMemberships} with memberships.`
+    );
+    clearSelection();
+    fetchCustomers();
+  }, [canBulkDelete, selectedCustomerIds, bulkDeleteConfirmText, clearSelection, fetchCustomers]);
+
+  useEffect(() => {
+    // If user can't delete (vendor/staff), ensure we don't keep stale selection state.
+    if (!canBulkDelete && selectedCustomerIds.size > 0) clearSelection();
+  }, [canBulkDelete, selectedCustomerIds.size, clearSelection]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -214,6 +295,21 @@ export default function CustomersPage() {
           <button type="button" className="auth-submit" style={{ width: 'auto' }} onClick={() => setShowForm(!showForm)}>
             {showForm ? 'Cancel' : 'Add customer'}
           </button>
+          {canBulkDelete && (
+            <>
+              <button type="button" className="filter-btn" onClick={selectAllFiltered} disabled={filteredCustomers.length === 0}>
+                Select all
+              </button>
+              <button type="button" className="filter-btn" onClick={clearSelection} disabled={selectedCustomerIds.size === 0}>
+                Clear
+              </button>
+              {selectedCustomerIds.size > 0 && (
+                <button type="button" className="customers-export-btn" onClick={openBulkDeleteDialog} disabled={bulkDeleting}>
+                  {bulkDeleting ? 'Deleting…' : `Delete selected (${selectedCustomerIds.size})`}
+                </button>
+              )}
+            </>
+          )}
           {showImportButton && (
             <label className="customers-import-btn">
               <input
@@ -229,6 +325,59 @@ export default function CustomersPage() {
             </label>
           )}
         </div>
+        {showBulkDeleteDialog && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirm delete selected customers"
+            onClick={() => setShowBulkDeleteDialog(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '1rem',
+              zIndex: 1000,
+            }}
+          >
+            <div
+              className="content-card"
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: '100%', maxWidth: 520 }}
+            >
+              <h3 style={{ marginTop: 0 }}>Delete selected customers?</h3>
+              <p className="text-muted">
+                You are about to delete <strong>{selectedCustomerIds.size}</strong> customer(s). Customers with memberships will be skipped.
+              </p>
+              <label className="settings-label">
+                <span>Type <strong>DELETE</strong> to confirm</span>
+                <input
+                  className="settings-input"
+                  value={bulkDeleteConfirmText}
+                  onChange={(e) => setBulkDeleteConfirmText(e.target.value)}
+                  placeholder="DELETE"
+                  autoFocus
+                />
+              </label>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                <button type="button" className="filter-btn" onClick={() => setShowBulkDeleteDialog(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="customers-export-btn"
+                  onClick={confirmBulkDelete}
+                  disabled={bulkDeleteConfirmText.trim().toUpperCase() !== 'DELETE'}
+                >
+                  Confirm delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {bulkDeleteMessage && <p className="text-muted" style={{ marginTop: '0.5rem' }}>{bulkDeleteMessage}</p>}
         {importResult && (
           <p className="customers-import-result">
             Import complete: {importResult.ok} created, {importResult.fail} failed, {importResult.skipped} skipped (missing name/phone).
@@ -327,6 +476,19 @@ export default function CustomersPage() {
                   onClick={() => navigate(`${basePath}/customers/${c.id}`)}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`${basePath}/customers/${c.id}`); } }}
                 >
+                  {canBulkDelete && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.5rem' }} onClick={(e) => e.stopPropagation()}>
+                      <label className="settings-checkbox-label" style={{ margin: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedCustomerIds.has(String(c.id))}
+                          onChange={() => toggleSelected(String(c.id))}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <span>Select</span>
+                      </label>
+                    </div>
+                  )}
                   <div className="customer-mobile-card-main">
                     <div className="customer-mobile-card-row">
                       <span className="customer-mobile-label">Card ID</span>
@@ -378,6 +540,9 @@ export default function CustomersPage() {
               <table className="data-table customers-table">
                 <thead>
                   <tr>
+                    {canBulkDelete && (
+                      <th style={{ width: '1%' }} aria-label="Select column" />
+                    )}
                     <th>Card ID</th>
                     <th>Name</th>
                     <th>Phone</th>
@@ -396,6 +561,17 @@ export default function CustomersPage() {
                         onClick={() => navigate(`${basePath}/customers/${c.id}`)}
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`${basePath}/customers/${c.id}`); } }}
                       >
+                        {canBulkDelete && (
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${c.name}`}
+                              checked={selectedCustomerIds.has(String(c.id))}
+                              onChange={() => toggleSelected(String(c.id))}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </td>
+                        )}
                         <td>{c.membershipCardId || '—'}</td>
                         <td><strong>{c.name}</strong></td>
                         <td>{c.phone}</td>

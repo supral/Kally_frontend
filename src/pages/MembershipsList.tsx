@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { getMemberships, createMembership, importMemberships, recordMembershipUsage, deleteMembership, type ImportRow } from '../api/memberships';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import { bulkDeleteMemberships, getMemberships, createMembership, importMemberships, recordMembershipUsage, deleteMembership, type ImportRow } from '../api/memberships';
 import { getCustomers } from '../api/customers';
 import { getBranches } from '../api/branches';
 import { getPackages } from '../api/packages';
@@ -43,6 +43,12 @@ export default function MembershipsList() {
   const [sessionsImporting, setSessionsImporting] = useState(false);
   const [sessionsImportResult, setSessionsImportResult] = useState<{ ok: number; fail: number; skipped: number } | null>(null);
   const [showImportButton, setShowImportButton] = useState(true);
+  const [showBulkDeleteMembershipsToAdmin, setShowBulkDeleteMembershipsToAdmin] = useState(false);
+  const [selectedMembershipIds, setSelectedMembershipIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkDeleteMessage, setBulkDeleteMessage] = useState('');
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [bulkDeleteConfirmText, setBulkDeleteConfirmText] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
   const [deleteConfirmError, setDeleteConfirmError] = useState('');
@@ -133,8 +139,75 @@ export default function MembershipsList() {
       if (r.success && r.settings && typeof r.settings.showImportButton === 'boolean') {
         setShowImportButton(r.settings.showImportButton);
       }
+      if (r.success && r.settings && typeof (r.settings as { showBulkDeleteMembershipsToAdmin?: boolean }).showBulkDeleteMembershipsToAdmin === 'boolean') {
+        setShowBulkDeleteMembershipsToAdmin((r.settings as { showBulkDeleteMembershipsToAdmin: boolean }).showBulkDeleteMembershipsToAdmin);
+      }
     });
   }, []);
+
+  const canBulkDelete = isAdmin && showBulkDeleteMembershipsToAdmin;
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedMembershipIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedMembershipIds(new Set()), []);
+
+  const selectAllFiltered = useCallback(() => {
+    setSelectedMembershipIds(new Set(filteredMemberships.map((m) => String(m.id))));
+  }, [filteredMemberships]);
+
+  useEffect(() => {
+    if (!canBulkDelete && selectedMembershipIds.size > 0) clearSelection();
+  }, [canBulkDelete, selectedMembershipIds.size, clearSelection]);
+
+  const openBulkDeleteDialog = useCallback(() => {
+    if (!canBulkDelete) return;
+    if (selectedMembershipIds.size === 0) return;
+    setBulkDeleteConfirmText('');
+    setShowBulkDeleteDialog(true);
+  }, [canBulkDelete, selectedMembershipIds.size]);
+
+  const confirmBulkDelete = useCallback(async () => {
+    if (!canBulkDelete) return;
+    const ids = Array.from(selectedMembershipIds);
+    if (ids.length === 0) return;
+    if (bulkDeleteConfirmText.trim().toUpperCase() !== 'DELETE') return;
+    setShowBulkDeleteDialog(false);
+    setBulkDeleting(true);
+    setBulkDeleteMessage('');
+    setError('');
+    const BATCH_SIZE = 5000;
+    let totalMemberships = 0;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      setBulkDeleteMessage(`Deleting ${Math.min(i + batch.length, ids.length)} of ${ids.length}…`);
+      // eslint-disable-next-line no-await-in-loop
+      const r = await bulkDeleteMemberships(batch);
+      if (!r.success) {
+        setBulkDeleting(false);
+        setError(r.message || 'Failed to delete selected memberships.');
+        return;
+      }
+      totalMemberships += r.deleted?.memberships ?? 0;
+    }
+    setBulkDeleting(false);
+    setBulkDeleteMessage(`Deleted ${totalMemberships} membership(s).`);
+    clearSelection();
+    getMemberships({
+      branchId: branchId || undefined,
+      status: status || undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+    }).then((r) => {
+      if (r.success && 'memberships' in r) setMemberships((r as { memberships: Membership[] }).memberships);
+    });
+  }, [canBulkDelete, selectedMembershipIds, bulkDeleteConfirmText, clearSelection, branchId, status, dateFrom, dateTo]);
 
   useEffect(() => {
     setPage(1);
@@ -724,6 +797,21 @@ export default function MembershipsList() {
           >
             Export to CSV / Excel
           </button>
+          {canBulkDelete && (
+            <>
+              <button type="button" className="filter-btn" onClick={selectAllFiltered} disabled={filteredMemberships.length === 0}>
+                Select all
+              </button>
+              <button type="button" className="filter-btn" onClick={clearSelection} disabled={selectedMembershipIds.size === 0}>
+                Clear
+              </button>
+              {selectedMembershipIds.size > 0 && (
+                <button type="button" className="customers-export-btn" onClick={openBulkDeleteDialog} disabled={bulkDeleting}>
+                  {bulkDeleting ? 'Deleting…' : `Delete selected (${selectedMembershipIds.size})`}
+                </button>
+              )}
+            </>
+          )}
           {showImportButton && (
             <>
               <label className="memberships-import-btn">
@@ -754,6 +842,40 @@ export default function MembershipsList() {
             </>
           )}
         </div>
+        {showBulkDeleteDialog && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirm delete selected memberships"
+            onClick={() => setShowBulkDeleteDialog(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '1rem',
+              zIndex: 1000,
+            }}
+          >
+            <div className="content-card" onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 520 }}>
+              <h3 style={{ marginTop: 0 }}>Delete selected memberships?</h3>
+              <p className="text-muted">This will delete <strong>{selectedMembershipIds.size}</strong> membership(s) and related usage/settlement records.</p>
+              <label className="settings-label">
+                <span>Type <strong>DELETE</strong> to confirm</span>
+                <input className="settings-input" value={bulkDeleteConfirmText} onChange={(e) => setBulkDeleteConfirmText(e.target.value)} placeholder="DELETE" autoFocus />
+              </label>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                <button type="button" className="filter-btn" onClick={() => setShowBulkDeleteDialog(false)}>Cancel</button>
+                <button type="button" className="customers-export-btn" onClick={confirmBulkDelete} disabled={bulkDeleteConfirmText.trim().toUpperCase() !== 'DELETE'}>
+                  Confirm delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {bulkDeleteMessage && <p className="text-muted" style={{ marginTop: '0.5rem' }}>{bulkDeleteMessage}</p>}
         {importResult && (
           <div className="memberships-import-result" role="status">
             <p className="memberships-import-success">
@@ -803,6 +925,19 @@ export default function MembershipsList() {
                     onClick={() => navigate(`${basePath}/memberships/${m.id}`)}
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`${basePath}/memberships/${m.id}`); } }}
                   >
+                    {canBulkDelete && (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.5rem' }} onClick={(e) => e.stopPropagation()}>
+                        <label className="settings-checkbox-label" style={{ margin: 0 }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedMembershipIds.has(String(m.id))}
+                            onChange={() => toggleSelected(String(m.id))}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span>Select</span>
+                        </label>
+                      </div>
+                    )}
                     <div className="membership-mobile-card-main">
                       <div className="membership-mobile-card-row">
                         <span className="membership-mobile-label">Customer</span>
@@ -857,6 +992,7 @@ export default function MembershipsList() {
               <table className="data-table memberships-table">
                 <thead>
                   <tr>
+                    {canBulkDelete && <th style={{ width: '1%' }} aria-label="Select column" />}
                     <th>Customer</th>
                     <th className="num">Total / Used / Remaining</th>
                     <th>Package name</th>
@@ -875,6 +1011,17 @@ export default function MembershipsList() {
                     onClick={() => navigate(`${basePath}/memberships/${m.id}`)}
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`${basePath}/memberships/${m.id}`); } }}
                   >
+                    {canBulkDelete && (
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select membership ${m.id}`}
+                          checked={selectedMembershipIds.has(String(m.id))}
+                          onChange={() => toggleSelected(String(m.id))}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </td>
+                    )}
                     <td><strong>{m.customer?.name || '—'}</strong> {m.customer?.phone && `(${m.customer.phone})`}</td>
                     <td className="num">{m.totalCredits} / {m.usedCredits} / {(m.remainingCredits ?? m.totalCredits - m.usedCredits)}</td>
                     <td>{m.packageName || m.typeName || '—'}</td>

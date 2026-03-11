@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { getPackages, createPackage, updatePackage, deletePackage } from '../../../api/packages';
+import { bulkDeletePackages, getPackages, createPackage, updatePackage, deletePackage } from '../../../api/packages';
 import { getSettings } from '../../../api/settings';
 import { useAuth } from '../../../auth/hooks/useAuth';
 import { formatCurrency } from '../../../utils/money';
@@ -32,6 +32,12 @@ export default function AdminPackagesPage() {
   const [importResult, setImportResult] = useState<{ ok: number; fail: number; skipped: number } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [showImportButton, setShowImportButton] = useState(true);
+  const [showBulkDeletePackagesToAdmin, setShowBulkDeletePackagesToAdmin] = useState(false);
+  const [selectedPackageIds, setSelectedPackageIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkDeleteMessage, setBulkDeleteMessage] = useState('');
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [bulkDeleteConfirmText, setBulkDeleteConfirmText] = useState('');
   const PAGE_SIZE = 10;
   const totalPages = Math.max(1, Math.ceil(packages.length / PAGE_SIZE));
   const currentPage = Math.min(Math.max(1, page), totalPages);
@@ -54,8 +60,68 @@ export default function AdminPackagesPage() {
       if (r.success && r.settings && typeof r.settings.showImportButton === 'boolean') {
         setShowImportButton(r.settings.showImportButton);
       }
+      if (r.success && r.settings && typeof (r.settings as { showBulkDeletePackagesToAdmin?: boolean }).showBulkDeletePackagesToAdmin === 'boolean') {
+        setShowBulkDeletePackagesToAdmin((r.settings as { showBulkDeletePackagesToAdmin: boolean }).showBulkDeletePackagesToAdmin);
+      }
     });
   }, []);
+
+  const canBulkDelete = isAdmin && showBulkDeletePackagesToAdmin;
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedPackageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedPackageIds(new Set()), []);
+
+  const selectAll = useCallback(() => {
+    setSelectedPackageIds(new Set(packages.map((p) => String(p.id))));
+  }, [packages]);
+
+  useEffect(() => {
+    if (!canBulkDelete && selectedPackageIds.size > 0) clearSelection();
+  }, [canBulkDelete, selectedPackageIds.size, clearSelection]);
+
+  const openBulkDeleteDialog = useCallback(() => {
+    if (!canBulkDelete) return;
+    if (selectedPackageIds.size === 0) return;
+    setBulkDeleteConfirmText('');
+    setShowBulkDeleteDialog(true);
+  }, [canBulkDelete, selectedPackageIds.size]);
+
+  const confirmBulkDelete = useCallback(async () => {
+    if (!canBulkDelete) return;
+    const ids = Array.from(selectedPackageIds);
+    if (ids.length === 0) return;
+    if (bulkDeleteConfirmText.trim().toUpperCase() !== 'DELETE') return;
+    setShowBulkDeleteDialog(false);
+    setBulkDeleting(true);
+    setBulkDeleteMessage('');
+    setError('');
+    const BATCH_SIZE = 5000;
+    let total = 0;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      setBulkDeleteMessage(`Deactivating ${Math.min(i + batch.length, ids.length)} of ${ids.length}…`);
+      // eslint-disable-next-line no-await-in-loop
+      const r = await bulkDeletePackages(batch);
+      if (!r.success) {
+        setBulkDeleting(false);
+        setError(r.message || 'Failed to delete selected packages.');
+        return;
+      }
+      total += r.deactivated ?? 0;
+    }
+    setBulkDeleting(false);
+    setBulkDeleteMessage(`Deactivated ${total} package(s).`);
+    clearSelection();
+    loadPackages();
+  }, [canBulkDelete, selectedPackageIds, bulkDeleteConfirmText, clearSelection, loadPackages]);
 
   const calculatedSettlement = useMemo(() => {
     const p = parseFloat(price);
@@ -236,6 +302,21 @@ export default function AdminPackagesPage() {
             >
               {showForm ? 'Cancel' : 'Add package'}
             </button>
+            {canBulkDelete && (
+              <>
+                <button type="button" className="filter-btn" onClick={selectAll} disabled={packages.length === 0}>
+                  Select all
+                </button>
+                <button type="button" className="filter-btn" onClick={clearSelection} disabled={selectedPackageIds.size === 0}>
+                  Clear
+                </button>
+                {selectedPackageIds.size > 0 && (
+                  <button type="button" className="customers-export-btn" onClick={openBulkDeleteDialog} disabled={bulkDeleting}>
+                    {bulkDeleting ? 'Deleting…' : `Delete selected (${selectedPackageIds.size})`}
+                  </button>
+                )}
+              </>
+            )}
             {isAdmin && showImportButton && (
               <label className="packages-import-btn">
                 <input
@@ -284,6 +365,40 @@ export default function AdminPackagesPage() {
       )}
 
       {error && <div className="auth-error packages-page-error" role="alert">{error}</div>}
+      {showBulkDeleteDialog && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm delete selected packages"
+          onClick={() => setShowBulkDeleteDialog(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+            zIndex: 1000,
+          }}
+        >
+          <div className="content-card" onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 520 }}>
+            <h3 style={{ marginTop: 0 }}>Delete selected packages?</h3>
+            <p className="text-muted">This will deactivate <strong>{selectedPackageIds.size}</strong> package(s).</p>
+            <label className="settings-label">
+              <span>Type <strong>DELETE</strong> to confirm</span>
+              <input className="settings-input" value={bulkDeleteConfirmText} onChange={(e) => setBulkDeleteConfirmText(e.target.value)} placeholder="DELETE" autoFocus />
+            </label>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+              <button type="button" className="filter-btn" onClick={() => setShowBulkDeleteDialog(false)}>Cancel</button>
+              <button type="button" className="customers-export-btn" onClick={confirmBulkDelete} disabled={bulkDeleteConfirmText.trim().toUpperCase() !== 'DELETE'}>
+                Confirm delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {bulkDeleteMessage && <p className="text-muted" style={{ marginTop: '0.5rem' }}>{bulkDeleteMessage}</p>}
 
       {importResult && (
         <section className="content-card packages-import-result-card">
@@ -319,6 +434,18 @@ export default function AdminPackagesPage() {
               )}
               {paginatedPackages.map((p) => (
                 <div key={p.id} className="package-mobile-card">
+                  {canBulkDelete && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.5rem' }}>
+                      <label className="settings-checkbox-label" style={{ margin: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedPackageIds.has(String(p.id))}
+                          onChange={() => toggleSelected(String(p.id))}
+                        />
+                        <span>Select</span>
+                      </label>
+                    </div>
+                  )}
                   <div className="package-mobile-card-main">
                     <div className="package-mobile-card-row">
                       <span className="package-mobile-label">Name</span>
@@ -376,6 +503,7 @@ export default function AdminPackagesPage() {
               <table className="data-table packages-table">
                 <thead>
                   <tr>
+                    {canBulkDelete && <th style={{ width: '1%' }} aria-label="Select column" />}
                     <th className="packages-table-name">Name</th>
                     <th className="packages-table-price">Price</th>
                     <th className="packages-table-discount">Discount</th>
@@ -389,7 +517,7 @@ export default function AdminPackagesPage() {
                   {paginatedPackages.map((p) => (
                     <tr key={p.id}>
                       {editingId === p.id && isAdmin ? (
-                        <td colSpan={7} className="packages-table-edit-cell">
+                        <td colSpan={canBulkDelete ? 8 : 7} className="packages-table-edit-cell">
                           <form onSubmit={handleUpdate} className="packages-page-inline-form">
                             <label><span>Name</span><input value={editName} onChange={(e) => setEditName(e.target.value)} required /></label>
                             <label>
@@ -416,6 +544,16 @@ export default function AdminPackagesPage() {
                         </td>
                       ) : (
                         <>
+                          {canBulkDelete && (
+                            <td>
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${p.name}`}
+                                checked={selectedPackageIds.has(String(p.id))}
+                                onChange={() => toggleSelected(String(p.id))}
+                              />
+                            </td>
+                          )}
                           <td className="packages-table-name"><strong>{p.name}</strong></td>
                           <td className="packages-table-price num">{formatCurrency(p.price)}</td>
                           <td className="packages-table-discount num">{(p.discountAmount ?? 0) > 0 ? formatCurrency(p.discountAmount!) : '—'}</td>

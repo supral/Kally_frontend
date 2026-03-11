@@ -2,7 +2,7 @@ import { http } from './http';
 import type { Customer } from '../types/common';
 
 export async function getCustomers(): Promise<{ success: boolean; customers?: Customer[]; message?: string }> {
-  const r = await http<{ customers: Customer[] }>('/customers');
+  const r = await http<{ customers: Customer[] }>('/customers?limit=10000');
   if (r.success && 'customers' in r) return { success: true, customers: r.customers as Customer[] };
   return { success: false, message: r.message };
 }

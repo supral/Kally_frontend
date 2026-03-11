@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { getBranches, createBranch, updateBranch, deleteBranch } from '../api/branches';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { getBranches, createBranch, updateBranch, deleteBranch, bulkDeleteBranches } from '../api/branches';
 import { getSettings } from '../api/settings';
 import { useAuth } from '../auth/hooks/useAuth';
 import type { Branch } from '../types/crm';
@@ -24,6 +24,12 @@ export default function BranchesPage() {
   const [importResult, setImportResult] = useState<{ ok: number; fail: number; skipped: number } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [showImportButton, setShowImportButton] = useState(true);
+  const [showBulkDeleteBranchesToAdmin, setShowBulkDeleteBranchesToAdmin] = useState(false);
+  const [selectedBranchIds, setSelectedBranchIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkDeleteMessage, setBulkDeleteMessage] = useState('');
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [bulkDeleteConfirmText, setBulkDeleteConfirmText] = useState('');
   const isAdmin = user?.role === 'admin';
   const PAGE_SIZE = 10;
   const totalPages = Math.max(1, Math.ceil(branches.length / PAGE_SIZE));
@@ -47,8 +53,68 @@ export default function BranchesPage() {
       if (r.success && r.settings && typeof r.settings.showImportButton === 'boolean') {
         setShowImportButton(r.settings.showImportButton);
       }
+      if (r.success && r.settings && typeof (r.settings as { showBulkDeleteBranchesToAdmin?: boolean }).showBulkDeleteBranchesToAdmin === 'boolean') {
+        setShowBulkDeleteBranchesToAdmin((r.settings as { showBulkDeleteBranchesToAdmin: boolean }).showBulkDeleteBranchesToAdmin);
+      }
     });
   }, []);
+
+  const canBulkDelete = isAdmin && showBulkDeleteBranchesToAdmin;
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedBranchIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedBranchIds(new Set()), []);
+
+  const selectAll = useCallback(() => {
+    setSelectedBranchIds(new Set(branches.map((b) => String(b.id))));
+  }, [branches]);
+
+  useEffect(() => {
+    if (!canBulkDelete && selectedBranchIds.size > 0) clearSelection();
+  }, [canBulkDelete, selectedBranchIds.size, clearSelection]);
+
+  const openBulkDeleteDialog = useCallback(() => {
+    if (!canBulkDelete) return;
+    if (selectedBranchIds.size === 0) return;
+    setBulkDeleteConfirmText('');
+    setShowBulkDeleteDialog(true);
+  }, [canBulkDelete, selectedBranchIds.size]);
+
+  const confirmBulkDelete = useCallback(async () => {
+    if (!canBulkDelete) return;
+    const ids = Array.from(selectedBranchIds);
+    if (ids.length === 0) return;
+    if (bulkDeleteConfirmText.trim().toUpperCase() !== 'DELETE') return;
+    setShowBulkDeleteDialog(false);
+    setBulkDeleting(true);
+    setBulkDeleteMessage('');
+    setError('');
+    const BATCH_SIZE = 5000;
+    let total = 0;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      setBulkDeleteMessage(`Deactivating ${Math.min(i + batch.length, ids.length)} of ${ids.length}…`);
+      // eslint-disable-next-line no-await-in-loop
+      const r = await bulkDeleteBranches(batch);
+      if (!r.success) {
+        setBulkDeleting(false);
+        setError(r.message || 'Failed to delete selected branches.');
+        return;
+      }
+      total += r.deactivated ?? 0;
+    }
+    setBulkDeleting(false);
+    setBulkDeleteMessage(`Deactivated ${total} branch(es).`);
+    clearSelection();
+    loadBranches();
+  }, [canBulkDelete, selectedBranchIds, bulkDeleteConfirmText, clearSelection]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -176,6 +242,21 @@ export default function BranchesPage() {
             <button type="button" className="auth-submit" style={{ marginBottom: '1rem', width: 'auto' }} onClick={() => setShowForm(!showForm)}>
               {showForm ? 'Cancel' : 'Add branch'}
             </button>
+            {canBulkDelete && (
+              <>
+                <button type="button" className="filter-btn" onClick={selectAll} disabled={branches.length === 0}>
+                  Select all
+                </button>
+                <button type="button" className="filter-btn" onClick={clearSelection} disabled={selectedBranchIds.size === 0}>
+                  Clear
+                </button>
+                {selectedBranchIds.size > 0 && (
+                  <button type="button" className="customers-export-btn" onClick={openBulkDeleteDialog} disabled={bulkDeleting}>
+                    {bulkDeleting ? 'Deleting…' : `Delete selected (${selectedBranchIds.size})`}
+                  </button>
+                )}
+              </>
+            )}
             {showImportButton && (
               <label className="branches-import-btn">
                 <input
@@ -192,6 +273,40 @@ export default function BranchesPage() {
             )}
           </div>
         )}
+        {showBulkDeleteDialog && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirm delete selected branches"
+            onClick={() => setShowBulkDeleteDialog(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '1rem',
+              zIndex: 1000,
+            }}
+          >
+            <div className="content-card" onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 520 }}>
+              <h3 style={{ marginTop: 0 }}>Delete selected branches?</h3>
+              <p className="text-muted">This will deactivate <strong>{selectedBranchIds.size}</strong> branch(es).</p>
+              <label className="settings-label">
+                <span>Type <strong>DELETE</strong> to confirm</span>
+                <input className="settings-input" value={bulkDeleteConfirmText} onChange={(e) => setBulkDeleteConfirmText(e.target.value)} placeholder="DELETE" autoFocus />
+              </label>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                <button type="button" className="filter-btn" onClick={() => setShowBulkDeleteDialog(false)}>Cancel</button>
+                <button type="button" className="customers-export-btn" onClick={confirmBulkDelete} disabled={bulkDeleteConfirmText.trim().toUpperCase() !== 'DELETE'}>
+                  Confirm delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {bulkDeleteMessage && <p className="text-muted" style={{ marginTop: '0.5rem' }}>{bulkDeleteMessage}</p>}
         {importResult && (
           <p className="branches-import-result">
             Import complete: {importResult.ok} created, {importResult.fail} failed, {importResult.skipped} skipped (missing name).
@@ -217,6 +332,18 @@ export default function BranchesPage() {
               <div className="branches-mobile-cards">
               {paginatedBranches.map((b) => (
                 <div key={b.id} className="branch-mobile-card">
+                  {canBulkDelete && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.5rem' }}>
+                      <label className="settings-checkbox-label" style={{ margin: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedBranchIds.has(String(b.id))}
+                          onChange={() => toggleSelected(String(b.id))}
+                        />
+                        <span>Select</span>
+                      </label>
+                    </div>
+                  )}
                   <div className="branch-mobile-card-main">
                     <div className="branch-mobile-card-row">
                       <span className="branch-mobile-label">Name</span>
@@ -246,6 +373,7 @@ export default function BranchesPage() {
               <table className="data-table branches-table">
                 <thead>
                   <tr>
+                    {canBulkDelete && <th style={{ width: '1%' }} aria-label="Select column" />}
                     <th>Name</th>
                     <th>Address</th>
                     <th>Zip code</th>
@@ -255,6 +383,16 @@ export default function BranchesPage() {
                 <tbody>
                   {paginatedBranches.map((b) => (
                   <tr key={b.id}>
+                    {canBulkDelete && (
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${b.name}`}
+                          checked={selectedBranchIds.has(String(b.id))}
+                          onChange={() => toggleSelected(String(b.id))}
+                        />
+                      </td>
+                    )}
                     <td><strong>{b.name}</strong></td>
                     <td>{b.address || '—'}</td>
                     <td>{b.zipCode || '—'}</td>

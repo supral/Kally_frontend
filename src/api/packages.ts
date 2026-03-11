@@ -28,3 +28,12 @@ export async function updatePackage(id: string, data: { name?: string; price?: n
 export async function deletePackage(id: string) {
   return apiRequest<{ message?: string }>(`/packages/${id}`, { method: 'DELETE' });
 }
+
+export async function bulkDeletePackages(ids: string[]): Promise<{ success: boolean; deactivated?: number; message?: string }> {
+  const r = await apiRequest<{ deactivated: number }>('/packages/bulk-delete', {
+    method: 'POST',
+    body: JSON.stringify({ ids, confirm: 'DELETE_SELECTED_PACKAGES' }),
+  });
+  const rr = r as unknown as { success: boolean; deactivated?: number; message?: string };
+  return rr.success ? { success: true, deactivated: rr.deactivated ?? 0 } : { success: false, message: rr.message };
+}

@@ -20,3 +20,12 @@ export async function deleteBranch(id: string): Promise<{ success: boolean; mess
   const r = await apiRequest<{ message?: string }>(`/branches/${id}`, { method: 'DELETE' });
   return r.success ? { success: true } : { success: false, message: (r as { message?: string }).message };
 }
+
+export async function bulkDeleteBranches(ids: string[]): Promise<{ success: boolean; deactivated?: number; message?: string }> {
+  const r = await apiRequest<{ deactivated: number }>('/branches/bulk-delete', {
+    method: 'POST',
+    body: JSON.stringify({ ids, confirm: 'DELETE_SELECTED_BRANCHES' }),
+  });
+  const rr = r as unknown as { success: boolean; deactivated?: number; message?: string };
+  return rr.success ? { success: true, deactivated: rr.deactivated ?? 0 } : { success: false, message: rr.message };
+}

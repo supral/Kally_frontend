@@ -13,8 +13,32 @@ export interface SystemSettings {
   showNotificationTickets?: boolean;
   showNotificationComments?: boolean;
   showNotificationSalesData?: boolean;
+  /** When true, admins see the notification bell in the top bar. */
+  showNotificationBellToAdmins?: boolean;
+  /** Which categories to show in the admin notification dropdown. */
+  showAdminNotificationAppointments?: boolean;
+  showAdminNotificationSettlements?: boolean;
+  showAdminNotificationTickets?: boolean;
+  showAdminNotificationComments?: boolean;
+  showAdminNotificationSalesData?: boolean;
   /** When true, Import buttons are visible on Branches, Packages, Customers, Memberships, Appointments. */
   showImportButton?: boolean;
+  /** When true, Admin sees the delete button(s) on the Customers page. */
+  showCustomerDeleteToAdmin?: boolean;
+  /** When true, Vendor sees the delete button(s) on the Customers page. */
+  showCustomerDeleteToVendor?: boolean;
+  /** When true, Staff sees the delete button(s) on the Customers page. */
+  showCustomerDeleteToStaff?: boolean;
+  /** When true, Admin sees the "Delete all customers" button (dangerous). */
+  showDeleteAllCustomersButtonToAdmin?: boolean;
+  /** When true, Admin sees the "Reset all data" button (dangerous). */
+  showResetAllDataButtonToAdmin?: boolean;
+  /** When true, Admin sees bulk delete controls on Branches page. */
+  showBulkDeleteBranchesToAdmin?: boolean;
+  /** When true, Admin sees bulk delete controls on Packages page. */
+  showBulkDeletePackagesToAdmin?: boolean;
+  /** When true, Admin sees bulk delete controls on Memberships page. */
+  showBulkDeleteMembershipsToAdmin?: boolean;
 }
 
 export async function getSettings(): Promise<{
@@ -37,7 +61,21 @@ export async function updateSettings(data: {
   showNotificationTickets?: boolean;
   showNotificationComments?: boolean;
   showNotificationSalesData?: boolean;
+  showNotificationBellToAdmins?: boolean;
+  showAdminNotificationAppointments?: boolean;
+  showAdminNotificationSettlements?: boolean;
+  showAdminNotificationTickets?: boolean;
+  showAdminNotificationComments?: boolean;
+  showAdminNotificationSalesData?: boolean;
   showImportButton?: boolean;
+  showCustomerDeleteToAdmin?: boolean;
+  showCustomerDeleteToVendor?: boolean;
+  showCustomerDeleteToStaff?: boolean;
+  showDeleteAllCustomersButtonToAdmin?: boolean;
+  showResetAllDataButtonToAdmin?: boolean;
+  showBulkDeleteBranchesToAdmin?: boolean;
+  showBulkDeletePackagesToAdmin?: boolean;
+  showBulkDeleteMembershipsToAdmin?: boolean;
 }): Promise<{
   success: boolean;
   settings?: SystemSettings;

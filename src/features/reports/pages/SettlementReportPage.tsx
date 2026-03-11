@@ -201,7 +201,7 @@ export default function SettlementReportPage() {
         <div className="settlements-hero-text">
           <h1 className="settlements-hero-title">Cross-branch settlements</h1>
           <p className="settlements-hero-subtitle">
-            Track what each branch owes when a membership is used at a different branch than where it was sold. Settlement % is set in Settings.
+            Track what each branch owes when a membership is used at a different branch than where it was sold.
           </p>
         </div>
         <div className="settlements-hero-actions">

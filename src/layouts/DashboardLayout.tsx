@@ -62,10 +62,10 @@ export function DashboardLayout({ title, navItems: navItemsProp }: DashboardLayo
   const [ticketCount, setTicketCount] = useState(0);
   const [showGuidelinesInVendor, setShowGuidelinesInVendor] = useState<boolean>(true);
   const [showNotificationBellToVendors, setShowNotificationBellToVendors] = useState<boolean>(true);
+  const [showNotificationBellToAdmins, setShowNotificationBellToAdmins] = useState<boolean>(true);
   const { user } = useAuthStore();
 
   useEffect(() => {
-    if (user?.role === 'admin') return;
     getSettings().then((r) => {
       if (r.success && r.settings) {
         if (typeof r.settings.showGuidelinesInVendorDashboard === 'boolean') {
@@ -73,6 +73,9 @@ export function DashboardLayout({ title, navItems: navItemsProp }: DashboardLayo
         }
         if (typeof r.settings.showNotificationBellToVendors === 'boolean') {
           setShowNotificationBellToVendors(r.settings.showNotificationBellToVendors);
+        }
+        if (typeof r.settings.showNotificationBellToAdmins === 'boolean') {
+          setShowNotificationBellToAdmins(r.settings.showNotificationBellToAdmins);
         }
       }
     });
@@ -101,7 +104,7 @@ export function DashboardLayout({ title, navItems: navItemsProp }: DashboardLayo
   return (
     <div className={`dashboard ${sidebarOpen ? 'dashboard-sidebar-open' : ''}`}>
       <Topbar title={displayTitle} onMenuClick={() => setSidebarOpen((o) => !o)}>
-        {user?.role === 'vendor' && showNotificationBellToVendors && <NotificationBell />}
+        {((user?.role === 'admin' && showNotificationBellToAdmins) || (user?.role === 'vendor' && showNotificationBellToVendors)) && <NotificationBell />}
         <ProfileMenu />
       </Topbar>
       <Sidebar

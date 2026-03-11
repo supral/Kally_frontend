@@ -6,6 +6,7 @@ import { getAppointments } from '../../api/appointments';
 import { getSettlements } from '../../api/reports';
 import { getTicketCount, getTickets } from '../../api/tickets';
 import { getSalesImages } from '../../api/salesImages';
+import { useAuthStore } from '../../auth/auth.store';
 import type { Appointment } from '../../types/crm';
 
 function BellIcon() {
@@ -17,11 +18,14 @@ function BellIcon() {
   );
 }
 
-const NOTIFICATION_SEEN_KEY = 'vendor_notification_seen';
+function getSeenStorageKey(role: string | undefined) {
+  return `${role === 'admin' ? 'admin' : 'vendor'}_notification_seen`;
+}
 
-function loadSeenFromStorage(): { appointments: number; settlements: number; tickets: number; comments: number; sales: number } {
+function loadSeenFromStorage(role: string | undefined): { appointments: number; settlements: number; tickets: number; comments: number; sales: number } {
   try {
-    const raw = localStorage.getItem(NOTIFICATION_SEEN_KEY);
+    // Back-compat: previously only vendors had the bell and the key was fixed.
+    const raw = localStorage.getItem(getSeenStorageKey(role)) ?? localStorage.getItem('vendor_notification_seen');
     if (!raw) return { appointments: 0, settlements: 0, tickets: 0, comments: 0, sales: 0 };
     const o = JSON.parse(raw) as Record<string, unknown>;
     if (o && typeof o === 'object') {
@@ -52,6 +56,10 @@ function formatAppointmentTime(dateStr: string): string {
 }
 
 export function NotificationBell() {
+  const { user } = useAuthStore();
+  const role = user?.role === 'admin' ? 'admin' : 'vendor';
+  const seenKey = getSeenStorageKey(role);
+  const routes = role === 'admin' ? ROUTES.admin : ROUTES.vendor;
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -65,11 +73,11 @@ export function NotificationBell() {
   const [showComments, setShowComments] = useState(true);
   const [showSalesData, setShowSalesData] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const [seenAppointments, setSeenAppointments] = useState(() => loadSeenFromStorage().appointments);
-  const [seenSettlements, setSeenSettlements] = useState(() => loadSeenFromStorage().settlements);
-  const [seenTickets, setSeenTickets] = useState(() => loadSeenFromStorage().tickets);
-  const [seenComments, setSeenComments] = useState(() => loadSeenFromStorage().comments);
-  const [seenSales, setSeenSales] = useState(() => loadSeenFromStorage().sales);
+  const [seenAppointments, setSeenAppointments] = useState(() => loadSeenFromStorage(role).appointments);
+  const [seenSettlements, setSeenSettlements] = useState(() => loadSeenFromStorage(role).settlements);
+  const [seenTickets, setSeenTickets] = useState(() => loadSeenFromStorage(role).tickets);
+  const [seenComments, setSeenComments] = useState(() => loadSeenFromStorage(role).comments);
+  const [seenSales, setSeenSales] = useState(() => loadSeenFromStorage(role).sales);
 
   const fetchNotificationData = useCallback(() => {
     const today = new Date();
@@ -123,14 +131,22 @@ export function NotificationBell() {
   useEffect(() => {
     getSettings().then((r) => {
       if (r.success && r.settings) {
-        setShowAppointments(r.settings.showNotificationAppointments !== false);
-        setShowSettlements(r.settings.showNotificationSettlements !== false);
-        setShowTickets(r.settings.showNotificationTickets !== false);
-        setShowComments(r.settings.showNotificationComments !== false);
-        setShowSalesData(r.settings.showNotificationSalesData !== false);
+        if (role === 'admin') {
+          setShowAppointments(r.settings.showAdminNotificationAppointments !== false);
+          setShowSettlements(r.settings.showAdminNotificationSettlements !== false);
+          setShowTickets(r.settings.showAdminNotificationTickets !== false);
+          setShowComments(r.settings.showAdminNotificationComments !== false);
+          setShowSalesData(r.settings.showAdminNotificationSalesData !== false);
+        } else {
+          setShowAppointments(r.settings.showNotificationAppointments !== false);
+          setShowSettlements(r.settings.showNotificationSettlements !== false);
+          setShowTickets(r.settings.showNotificationTickets !== false);
+          setShowComments(r.settings.showNotificationComments !== false);
+          setShowSalesData(r.settings.showNotificationSalesData !== false);
+        }
       }
     });
-  }, []);
+  }, [role]);
 
   useEffect(() => {
     setLoading(true);
@@ -158,11 +174,11 @@ export function NotificationBell() {
     setSeenComments(next.comments);
     setSeenSales(next.sales);
     try {
-      localStorage.setItem(NOTIFICATION_SEEN_KEY, JSON.stringify(next));
+      localStorage.setItem(seenKey, JSON.stringify(next));
     } catch {
       /* ignore */
     }
-  }, [appointments.length, pendingSettlementsCount, openTicketsCount, ticketsWithRepliesCount, salesImagesCount]);
+  }, [appointments.length, pendingSettlementsCount, openTicketsCount, ticketsWithRepliesCount, salesImagesCount, seenKey]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -217,7 +233,7 @@ export function NotificationBell() {
                         {appointments.slice(0, 1).map((a) => (
                           <li key={a.id}>
                             <Link
-                              to={ROUTES.vendor.appointments}
+                              to={routes.appointments}
                               onClick={() => setOpen(false)}
                               className="notification-item"
                             >
@@ -230,7 +246,7 @@ export function NotificationBell() {
                         ))}
                       </ul>
                       <Link
-                        to={ROUTES.vendor.appointments}
+                        to={routes.appointments}
                         className="notification-view-all"
                         onClick={() => setOpen(false)}
                       >
@@ -249,7 +265,7 @@ export function NotificationBell() {
                   ) : (
                     <>
                       <Link
-                        to={ROUTES.vendor.settlements}
+                        to={routes.settlements}
                         onClick={() => setOpen(false)}
                         className="notification-item notification-item-highlight"
                       >
@@ -258,7 +274,7 @@ export function NotificationBell() {
                         </span>
                       </Link>
                       <Link
-                        to={ROUTES.vendor.settlements}
+                        to={routes.settlements}
                         className="notification-view-all"
                         onClick={() => setOpen(false)}
                       >
@@ -277,7 +293,7 @@ export function NotificationBell() {
                   ) : (
                     <>
                       <Link
-                        to={ROUTES.vendor.tickets}
+                        to={routes.tickets}
                         onClick={() => setOpen(false)}
                         className="notification-item"
                       >
@@ -286,7 +302,7 @@ export function NotificationBell() {
                         </span>
                       </Link>
                       <Link
-                        to={ROUTES.vendor.tickets}
+                        to={routes.tickets}
                         className="notification-view-all"
                         onClick={() => setOpen(false)}
                       >
@@ -305,7 +321,7 @@ export function NotificationBell() {
                   ) : (
                     <>
                       <Link
-                        to={ROUTES.vendor.tickets}
+                        to={routes.tickets}
                         onClick={() => setOpen(false)}
                         className="notification-item"
                       >
@@ -314,7 +330,7 @@ export function NotificationBell() {
                         </span>
                       </Link>
                       <Link
-                        to={ROUTES.vendor.tickets}
+                        to={routes.tickets}
                         className="notification-view-all"
                         onClick={() => setOpen(false)}
                       >
@@ -333,7 +349,7 @@ export function NotificationBell() {
                   ) : (
                     <>
                       <Link
-                        to={ROUTES.vendor.salesImages}
+                        to={routes.salesImages}
                         onClick={() => setOpen(false)}
                         className="notification-item"
                       >
@@ -342,7 +358,7 @@ export function NotificationBell() {
                         </span>
                       </Link>
                       <Link
-                        to={ROUTES.vendor.salesImages}
+                        to={routes.salesImages}
                         className="notification-view-all"
                         onClick={() => setOpen(false)}
                       >
