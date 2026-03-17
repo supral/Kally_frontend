@@ -8,6 +8,25 @@ export async function getCustomers(): Promise<{ success: boolean; customers?: Cu
   return { success: false, message: (r as { message?: string }).message };
 }
 
+export async function getCustomersPaged(params?: {
+  page?: number;
+  limit?: number;
+  search?: string;
+  branchId?: string;
+}): Promise<{ success: boolean; customers?: Customer[]; total?: number; pages?: number; page?: number; limit?: number; message?: string }> {
+  const q = new URLSearchParams();
+  if (params?.page != null) q.set('page', String(params.page));
+  if (params?.limit != null) q.set('limit', String(params.limit));
+  if (params?.search) q.set('search', params.search);
+  if (params?.branchId) q.set('branchId', params.branchId);
+  const query = q.toString();
+  const r = await apiRequest<{ customers: Customer[]; total?: number; pages?: number; page?: number; limit?: number }>(`/customers${query ? `?${query}` : ''}`);
+  const rr = r as unknown as { success: boolean; customers?: Customer[]; total?: number; pages?: number; page?: number; limit?: number; message?: string };
+  return rr.success
+    ? { success: true, customers: rr.customers ?? [], total: rr.total, pages: rr.pages, page: rr.page, limit: rr.limit }
+    : { success: false, message: rr.message };
+}
+
 /** All customers in the system for name search/dropdown (e.g. Add customer form) */
 export async function getCustomersForDropdown(): Promise<{ success: boolean; customers?: (Customer & { primaryBranchId?: string | null })[]; message?: string }> {
   // Dropdowns also allow up to 20k, but UI should still rely on search for performance.

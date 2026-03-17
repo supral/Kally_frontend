@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { bulkDeleteCustomers, getCustomers, createCustomer } from '../../../api/customers';
+import { bulkDeleteCustomers, getCustomersPaged, createCustomer } from '../../../api/customers';
 import { getBranches } from '../../../api/branches';
 import { getSettings } from '../../../api/settings';
 import { useAuth } from '../../../auth/hooks/useAuth';
@@ -22,6 +22,8 @@ export default function CustomersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [branchFilterId, setBranchFilterId] = useState('');
   const [page, setPage] = useState(1);
+  const [customersTotal, setCustomersTotal] = useState(0);
+  const [customersTotalPages, setCustomersTotalPages] = useState(1);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ ok: number; fail: number; skipped: number } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -33,48 +35,42 @@ export default function CustomersPage() {
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [bulkDeleteConfirmText, setBulkDeleteConfirmText] = useState('');
   const isAdmin = user?.role === 'admin';
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = 100;
   const basePath = isAdmin ? '/admin' : '/vendor';
 
-  const { filteredCustomers, totalFiltered, totalPages, currentPage, paginatedCustomers } = useMemo(() => {
-    const selectedBranchName = branchFilterId ? branches.find((b) => b.id === branchFilterId)?.name : null;
-    const byBranch = branchFilterId
-      ? customers.filter((c) => c.primaryBranch === selectedBranchName)
-      : customers;
-    const searchLower = searchQuery.trim().toLowerCase();
-    const filtered = searchLower
-      ? byBranch.filter((c) => {
-          const card = (c.membershipCardId || '').toLowerCase();
-          const n = (c.name || '').toLowerCase();
-          const p = (c.phone || '').toLowerCase();
-          const e = (c.email || '').toLowerCase();
-          return card.includes(searchLower) || n.includes(searchLower) || p.includes(searchLower) || e.includes(searchLower);
-        })
-      : byBranch;
-    const total = filtered.length;
-    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    const current = Math.min(Math.max(1, page), pages);
-    const paginated = filtered.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
-    return {
-      filteredCustomers: filtered,
-      totalFiltered: total,
-      totalPages: pages,
-      currentPage: current,
-      paginatedCustomers: paginated,
-    };
-  }, [customers, branches, branchFilterId, searchQuery, page, PAGE_SIZE]);
+  const currentPage = useMemo(() => Math.min(Math.max(1, page), customersTotalPages), [page, customersTotalPages]);
+  const totalPages = customersTotalPages;
+  const totalFiltered = customersTotal;
+  const filteredCustomers = customers;
+  const paginatedCustomers = customers;
 
   useEffect(() => {
     setPage(1);
   }, [searchQuery, branchFilterId]);
 
-  const fetchCustomers = useCallback(() => {
-    getCustomers().then((r) => {
-      setLoading(false);
-      if (r.success && r.customers) setCustomers(r.customers);
-      else setError(r.message || 'Failed to load');
-    });
-  }, []);
+  const fetchCustomers = useCallback(
+    (opts?: { page?: number; search?: string; branchId?: string }) => {
+      const p = opts?.page ?? page;
+      const s = opts?.search ?? searchQuery;
+      const b = opts?.branchId ?? branchFilterId;
+      setLoading(true);
+      setError('');
+      getCustomersPaged({
+        page: p,
+        limit: PAGE_SIZE,
+        search: s.trim() || undefined,
+        branchId: isAdmin && b ? b : undefined,
+      }).then((r) => {
+        setLoading(false);
+        if (r.success && r.customers) {
+          setCustomers(r.customers);
+          setCustomersTotal(r.total ?? r.customers.length);
+          setCustomersTotalPages(r.pages ?? 1);
+        } else setError(r.message || 'Failed to load');
+      });
+    },
+    [PAGE_SIZE, branchFilterId, isAdmin, page, searchQuery]
+  );
 
   useEffect(() => {
     fetchCustomers();
@@ -87,6 +83,10 @@ export default function CustomersPage() {
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [fetchCustomers]);
+
+  useEffect(() => {
+    fetchCustomers();
+  }, [page, searchQuery, branchFilterId, fetchCustomers]);
 
   useEffect(() => {
     getBranches({ all: true }).then((r) => r.success && r.branches && setBranches(r.branches || []));
@@ -192,7 +192,8 @@ export default function CustomersPage() {
       setPrimaryBranchId('');
       setNotes('');
       setShowForm(false);
-      getCustomers().then((r) => r.success && r.customers && setCustomers(r.customers));
+      setPage(1);
+      fetchCustomers({ page: 1 });
     } else setError((res as { message?: string }).message || 'Failed to create');
   }
 

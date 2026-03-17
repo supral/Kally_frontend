@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { bulkDeleteMemberships, getMemberships, createMembership, importMemberships, recordMembershipUsage, deleteMembership, updateMembership, type ImportRow } from '../api/memberships';
+import { bulkDeleteMemberships, getMembershipsPaged, createMembership, importMemberships, recordMembershipUsage, deleteMembership, updateMembership, type ImportRow } from '../api/memberships';
 import { getCustomers } from '../api/customers';
 import { getBranches } from '../api/branches';
 import { getPackages } from '../api/packages';
@@ -16,6 +16,8 @@ export default function MembershipsList() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [membershipsTotal, setMembershipsTotal] = useState(0);
+  const [membershipsTotalPages, setMembershipsTotalPages] = useState(1);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [packages, setPackages] = useState<PackageItem[]>([]);
@@ -55,7 +57,7 @@ export default function MembershipsList() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const basePath = user?.role === 'admin' ? '/admin' : '/vendor';
   const isAdmin = user?.role === 'admin';
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = 100;
 
   const selectedPackage = useMemo(() => packages.find((p) => p.id === createPackageId), [packages, createPackageId]);
 
@@ -93,38 +95,11 @@ export default function MembershipsList() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const { filteredMemberships, totalFiltered, totalPages, currentPage, paginatedMemberships } = useMemo(() => {
-    const searchLower = searchQuery.trim().toLowerCase();
-    const filtered = searchLower
-      ? memberships.filter((m) => {
-          const customerName = (m.customer?.name ?? '').toLowerCase();
-          const customerPhone = (m.customer?.phone ?? '').toLowerCase();
-          const customerEmail = (m.customer?.email ?? '').toLowerCase();
-          const typeName = (m.typeName ?? '').toLowerCase();
-          const soldAt = (m.soldAtBranch ?? '').toLowerCase();
-          const statusStr = (m.status ?? '').toLowerCase();
-          return (
-            customerName.includes(searchLower) ||
-            customerPhone.includes(searchLower) ||
-            customerEmail.includes(searchLower) ||
-            typeName.includes(searchLower) ||
-            soldAt.includes(searchLower) ||
-            statusStr.includes(searchLower)
-          );
-        })
-      : memberships;
-    const total = filtered.length;
-    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    const current = Math.min(Math.max(1, page), pages);
-    const paginated = filtered.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
-    return {
-      filteredMemberships: filtered,
-      totalFiltered: total,
-      totalPages: pages,
-      currentPage: current,
-      paginatedMemberships: paginated,
-    };
-  }, [memberships, searchQuery, page, PAGE_SIZE]);
+  const currentPage = useMemo(() => Math.min(Math.max(1, page), membershipsTotalPages), [page, membershipsTotalPages]);
+  const totalFiltered = membershipsTotal;
+  const totalPages = membershipsTotalPages;
+  const filteredMemberships = memberships; // server already filtered
+  const paginatedMemberships = memberships; // server already paginated
 
   useEffect(() => {
     const customerIdFromUrl = searchParams.get('customerId');
@@ -199,15 +174,25 @@ export default function MembershipsList() {
     setBulkDeleting(false);
     setBulkDeleteMessage(`Deleted ${totalMemberships} membership(s).`);
     clearSelection();
-    getMemberships({
+    setPage(1);
+    setLoading(true);
+    getMembershipsPaged({
       branchId: branchId || undefined,
       status: status || undefined,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
+      page: 1,
+      limit: PAGE_SIZE,
+      search: searchQuery.trim() || undefined,
     }).then((r) => {
-      if (r.success && 'memberships' in r) setMemberships((r as { memberships: Membership[] }).memberships);
+      setLoading(false);
+      if (r.success && r.memberships) {
+        setMemberships(r.memberships);
+        setMembershipsTotal(r.total ?? r.memberships.length);
+        setMembershipsTotalPages(r.pages ?? 1);
+      }
     });
-  }, [canBulkDelete, selectedMembershipIds, bulkDeleteConfirmText, clearSelection, branchId, status, dateFrom, dateTo]);
+  }, [canBulkDelete, selectedMembershipIds, bulkDeleteConfirmText, clearSelection, branchId, status, dateFrom, dateTo, PAGE_SIZE, searchQuery]);
 
   useEffect(() => {
     setPage(1);
@@ -660,8 +645,23 @@ export default function MembershipsList() {
           setImporting(false);
           setImportResult({ imported, createdCustomers: 0, errors: [] });
           if (imported > 0) {
-            getMemberships({ branchId: branchId || undefined, status: status || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined }).then((r) => {
-              if (r.success && 'memberships' in r) setMemberships((r as { memberships: Membership[] }).memberships);
+            setPage(1);
+            setLoading(true);
+            getMembershipsPaged({
+              branchId: branchId || undefined,
+              status: status || undefined,
+              dateFrom: dateFrom || undefined,
+              dateTo: dateTo || undefined,
+              page: 1,
+              limit: PAGE_SIZE,
+              search: searchQuery.trim() || undefined,
+            }).then((r) => {
+              setLoading(false);
+              if (r.success && r.memberships) {
+                setMemberships(r.memberships);
+                setMembershipsTotal(r.total ?? r.memberships.length);
+                setMembershipsTotalPages(r.pages ?? 1);
+              }
             });
           }
           return;
@@ -708,8 +708,23 @@ export default function MembershipsList() {
           setImporting(false);
           setImportResult({ imported, createdCustomers: 0, errors: [] });
           if (imported > 0) {
-            getMemberships({ branchId: branchId || undefined, status: status || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined }).then((r) => {
-              if (r.success && 'memberships' in r) setMemberships((r as { memberships: Membership[] }).memberships);
+            setPage(1);
+            setLoading(true);
+            getMembershipsPaged({
+              branchId: branchId || undefined,
+              status: status || undefined,
+              dateFrom: dateFrom || undefined,
+              dateTo: dateTo || undefined,
+              page: 1,
+              limit: PAGE_SIZE,
+              search: searchQuery.trim() || undefined,
+            }).then((r) => {
+              setLoading(false);
+              if (r.success && r.memberships) {
+                setMemberships(r.memberships);
+                setMembershipsTotal(r.total ?? r.memberships.length);
+                setMembershipsTotalPages(r.pages ?? 1);
+              }
             });
           }
           return;
@@ -750,8 +765,23 @@ export default function MembershipsList() {
         setImporting(false);
         setImportResult({ imported, createdCustomers: 0, errors: [] });
         if (imported > 0) {
-          getMemberships({ branchId: branchId || undefined, status: status || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined }).then((r) => {
-            if (r.success && 'memberships' in r) setMemberships((r as { memberships: Membership[] }).memberships);
+          setPage(1);
+          setLoading(true);
+          getMembershipsPaged({
+            branchId: branchId || undefined,
+            status: status || undefined,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+            page: 1,
+            limit: PAGE_SIZE,
+            search: searchQuery.trim() || undefined,
+          }).then((r) => {
+            setLoading(false);
+            if (r.success && r.memberships) {
+              setMemberships(r.memberships);
+              setMembershipsTotal(r.total ?? r.memberships.length);
+              setMembershipsTotalPages(r.pages ?? 1);
+            }
           });
         }
         return;
@@ -772,13 +802,23 @@ export default function MembershipsList() {
     setImporting(false);
     if (res.success && res.imported != null) {
       setImportResult({ imported: res.imported, createdCustomers: res.createdCustomers ?? 0, errors: res.errors ?? [] });
-      getMemberships({
+      setPage(1);
+      setLoading(true);
+      getMembershipsPaged({
         branchId: branchId || undefined,
         status: status || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
+        page: 1,
+        limit: PAGE_SIZE,
+        search: searchQuery.trim() || undefined,
       }).then((r) => {
-        if (r.success && 'memberships' in r) setMemberships((r as { memberships: Membership[] }).memberships);
+        setLoading(false);
+        if (r.success && r.memberships) {
+          setMemberships(r.memberships);
+          setMembershipsTotal(r.total ?? r.memberships.length);
+          setMembershipsTotalPages(r.pages ?? 1);
+        }
       });
     } else setError(res.message || 'Import failed.');
   }
@@ -841,8 +881,23 @@ export default function MembershipsList() {
       }
       setSessionsImportResult({ ok, fail, skipped, missingMembershipIds, missingBranchIds });
       if (ok > 0) {
-        getMemberships({ branchId: branchId || undefined, status: status || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined }).then((r) => {
-          if (r.success && 'memberships' in r) setMemberships((r as { memberships: Membership[] }).memberships);
+        setPage(1);
+        setLoading(true);
+        getMembershipsPaged({
+          branchId: branchId || undefined,
+          status: status || undefined,
+          dateFrom: dateFrom || undefined,
+          dateTo: dateTo || undefined,
+          page: 1,
+          limit: PAGE_SIZE,
+          search: searchQuery.trim() || undefined,
+        }).then((r) => {
+          setLoading(false);
+          if (r.success && r.memberships) {
+            setMemberships(r.memberships);
+            setMembershipsTotal(r.total ?? r.memberships.length);
+            setMembershipsTotalPages(r.pages ?? 1);
+          }
         });
       }
     } catch (err) {
@@ -862,17 +917,26 @@ export default function MembershipsList() {
 
   useEffect(() => {
     setLoading(true);
-    getMemberships({
+    setError('');
+    getMembershipsPaged({
       branchId: branchId || undefined,
       status: status || undefined,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
+      page,
+      limit: PAGE_SIZE,
+      search: searchQuery.trim() || undefined,
     }).then((r) => {
       setLoading(false);
-      if (r.success && 'memberships' in r) setMemberships((r as { memberships: Membership[] }).memberships);
-      else setError((r as { message?: string }).message || 'Failed to load');
+      if (r.success && r.memberships) {
+        setMemberships(r.memberships);
+        setMembershipsTotal(r.total ?? r.memberships.length);
+        setMembershipsTotalPages(r.pages ?? 1);
+      } else {
+        setError(r.message || 'Failed to load');
+      }
     });
-  }, [branchId, status, dateFrom, dateTo]);
+  }, [branchId, status, dateFrom, dateTo, page, PAGE_SIZE, searchQuery]);
 
   useEffect(() => {
     if (createPackageId && selectedPackage) setCreatePackagePrice(String(selectedPackage.price));
@@ -917,12 +981,24 @@ export default function MembershipsList() {
       setCreatePackageId('');
       setCreatePackagePrice('');
       setCreateDiscountAmount('');
-      getMemberships({
+      setPage(1);
+      setLoading(true);
+      getMembershipsPaged({
         branchId: branchId || undefined,
         status: status || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
-      }).then((r) => r.success && 'memberships' in r && setMemberships((r as { memberships: Membership[] }).memberships));
+        page: 1,
+        limit: PAGE_SIZE,
+        search: searchQuery.trim() || undefined,
+      }).then((r) => {
+        setLoading(false);
+        if (r.success && r.memberships) {
+          setMemberships(r.memberships);
+          setMembershipsTotal(r.total ?? r.memberships.length);
+          setMembershipsTotalPages(r.pages ?? 1);
+        }
+      });
     } else setError((res as { message?: string }).message || 'Failed to create membership');
   }
 
@@ -1225,8 +1301,6 @@ export default function MembershipsList() {
           <div className="vendors-loading"><div className="spinner" /><span>Loading...</span></div>
         ) : memberships.length === 0 ? (
           <p className="vendors-empty">No memberships found.</p>
-        ) : filteredMemberships.length === 0 ? (
-          <p className="vendors-empty">No memberships match your search.</p>
         ) : (
           <>
             {/* Mobile: card list */}

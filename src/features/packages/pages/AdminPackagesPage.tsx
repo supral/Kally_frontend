@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { bulkDeletePackages, getPackages, createPackage, updatePackage, deletePackage } from '../../../api/packages';
+import { bulkDeletePackages, getPackagesPaged, createPackage, updatePackage, deletePackage } from '../../../api/packages';
 import { getSettings } from '../../../api/settings';
 import { useAuth } from '../../../auth/hooks/useAuth';
 import { formatCurrency } from '../../../utils/money';
@@ -14,6 +14,8 @@ export default function AdminPackagesPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [packages, setPackages] = useState<PackageItem[]>([]);
+  const [packagesTotal, setPackagesTotal] = useState(0);
+  const [packagesTotalPages, setPackagesTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -40,36 +42,32 @@ export default function AdminPackagesPage() {
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [bulkDeleteConfirmText, setBulkDeleteConfirmText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = 100;
 
-  const { filteredPackages, totalPages, currentPage, paginatedPackages } = useMemo(() => {
-    const searchLower = searchQuery.trim().toLowerCase();
-    const filtered = searchLower
-      ? packages.filter((p) => {
-          const name = (p.name || '').toLowerCase();
-          const sessions = String(p.totalSessions ?? '').toLowerCase();
-          const status = p.isActive === false ? 'inactive' : 'active';
-          return name.includes(searchLower) || sessions.includes(searchLower) || status.includes(searchLower);
-        })
-      : packages;
-    const total = filtered.length;
-    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    const current = Math.min(Math.max(1, page), pages);
-    const paginated = filtered.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
-    return { filteredPackages: filtered, totalPages: pages, currentPage: current, paginatedPackages: paginated };
-  }, [packages, searchQuery, page, PAGE_SIZE]);
+  const currentPage = useMemo(() => Math.min(Math.max(1, page), packagesTotalPages), [page, packagesTotalPages]);
+  const totalPages = packagesTotalPages;
+  const filteredPackages = packages; // server already filtered
+  const paginatedPackages = packages; // server already paginated
 
-  const loadPackages = useCallback(() => {
-    getPackages(isAdmin).then((r) => {
+  const loadPackages = useCallback((opts?: { page?: number; search?: string }) => {
+    const p = opts?.page ?? page;
+    const s = opts?.search ?? searchQuery;
+    setLoading(true);
+    setError('');
+    getPackagesPaged({ includeInactive: isAdmin, page: p, limit: PAGE_SIZE, search: s.trim() || undefined }).then((r) => {
       setLoading(false);
-      if (r.success && r.packages) setPackages(r.packages);
-      else setError(r.message || 'Failed to load packages');
+      if (r.success && r.packages) {
+        setPackages(r.packages);
+        setPackagesTotal(r.total ?? r.packages.length);
+        setPackagesTotalPages(r.pages ?? 1);
+      } else setError(r.message || 'Failed to load packages');
     });
-  }, [isAdmin]);
+  }, [isAdmin, page, searchQuery, PAGE_SIZE]);
 
   useEffect(() => {
+    // Server-side search/paging
     loadPackages();
-  }, [loadPackages]);
+  }, [page, searchQuery, loadPackages]);
 
   useEffect(() => {
     getSettings().then((r) => {
@@ -140,7 +138,8 @@ export default function AdminPackagesPage() {
     setBulkDeleting(false);
     setBulkDeleteMessage(`Deactivated ${total} package(s).`);
     clearSelection();
-    loadPackages();
+    setPage(1);
+    loadPackages({ page: 1 });
   }, [canBulkDelete, selectedPackageIds, bulkDeleteConfirmText, clearSelection, loadPackages]);
 
   const calculatedSettlement = useMemo(() => {
@@ -189,7 +188,8 @@ export default function AdminPackagesPage() {
       setDiscountAmount('');
       setTotalSessions('');
       setShowForm(false);
-      loadPackages();
+      setPage(1);
+      loadPackages({ page: 1 });
     } else setError((res as { message?: string }).message || 'Failed to create');
   }
 
@@ -447,7 +447,7 @@ export default function AdminPackagesPage() {
           <>
             <div className="packages-page-header-row">
               <p className="packages-page-count text-muted">
-                Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredPackages.length)} of {filteredPackages.length} package{filteredPackages.length !== 1 ? 's' : ''}
+                Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, packagesTotal)} of {packagesTotal} package{packagesTotal !== 1 ? 's' : ''}
               </p>
               <div className="packages-page-search">
                 <input

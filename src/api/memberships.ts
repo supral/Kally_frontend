@@ -15,10 +15,33 @@ export async function getMemberships(params?: { branchId?: string; customerId?: 
   if (params?.status) q.set('status', params.status);
   if (params?.dateFrom) q.set('dateFrom', params.dateFrom);
   if (params?.dateTo) q.set('dateTo', params.dateTo);
-  // Fetch up to 40k memberships so large accounts can see all records in the list.
-  q.set('limit', '40000');
   const query = q.toString();
   return apiRequest<{ memberships: Membership[] }>(`/memberships${query ? `?${query}` : ''}`);
+}
+
+export async function getMembershipsPaged(params?: {
+  branchId?: string;
+  customerId?: string;
+  status?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  limit?: number;
+  search?: string;
+}): Promise<{ success: boolean; memberships?: Membership[]; total?: number; pages?: number; page?: number; limit?: number; message?: string }> {
+  const q = new URLSearchParams();
+  if (params?.branchId) q.set('branchId', params.branchId);
+  if (params?.customerId) q.set('customerId', params.customerId);
+  if (params?.status) q.set('status', params.status);
+  if (params?.dateFrom) q.set('dateFrom', params.dateFrom);
+  if (params?.dateTo) q.set('dateTo', params.dateTo);
+  if (params?.page != null) q.set('page', String(params.page));
+  if (params?.limit != null) q.set('limit', String(params.limit));
+  if (params?.search) q.set('search', params.search);
+  const query = q.toString();
+  const r = await apiRequest<{ memberships: Membership[]; total?: number; pages?: number; page?: number; limit?: number }>(`/memberships${query ? `?${query}` : ''}`);
+  const rr = r as unknown as { success: boolean; memberships?: Membership[]; total?: number; pages?: number; page?: number; limit?: number; message?: string };
+  return rr.success ? { success: true, memberships: rr.memberships ?? [], total: rr.total, pages: rr.pages, page: rr.page, limit: rr.limit } : { success: false, message: rr.message };
 }
 
 export async function getMembership(id: string): Promise<{ success: boolean; membership?: Membership; usageHistory?: MembershipUsage[]; message?: string }> {

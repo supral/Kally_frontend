@@ -17,6 +17,23 @@ export async function getPackages(includeInactive = false): Promise<{ success: b
   return { success: false, message: (r as { message?: string }).message };
 }
 
+export async function getPackagesPaged(params?: {
+  includeInactive?: boolean;
+  page?: number;
+  limit?: number;
+  search?: string;
+}): Promise<{ success: boolean; packages?: PackageItem[]; total?: number; pages?: number; page?: number; limit?: number; message?: string }> {
+  const q = new URLSearchParams();
+  if (params?.includeInactive) q.set('all', 'true');
+  if (params?.page != null) q.set('page', String(params.page));
+  if (params?.limit != null) q.set('limit', String(params.limit));
+  if (params?.search) q.set('search', params.search);
+  const query = q.toString();
+  const r = await apiRequest<{ packages: PackageItem[]; total?: number; pages?: number; page?: number; limit?: number }>(`/packages${query ? `?${query}` : ''}`);
+  const rr = r as unknown as { success: boolean; packages?: PackageItem[]; total?: number; pages?: number; page?: number; limit?: number; message?: string };
+  return rr.success ? { success: true, packages: rr.packages ?? [], total: rr.total, pages: rr.pages, page: rr.page, limit: rr.limit } : { success: false, message: rr.message };
+}
+
 export async function createPackage(data: { name: string; price: number; discountAmount?: number; totalSessions: number }) {
   return apiRequest<{ package: PackageItem }>('/packages', { method: 'POST', body: JSON.stringify(data) });
 }
