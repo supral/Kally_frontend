@@ -326,7 +326,7 @@ export default function AdminDashboardPage() {
                   <YAxis type="category" dataKey="name" width={90} tick={{ fill: 'var(--theme-text)', fontSize: 11 }} />
                   <Tooltip
                     contentStyle={{ background: 'var(--theme-bg-card)', border: '1px solid var(--theme-border)', borderRadius: 8 }}
-                    formatter={(value: number | undefined) => [formatNumber(value ?? 0), 'Memberships']}
+                    formatter={(value) => [formatNumber(Number(value) || 0), 'Memberships']}
                     labelFormatter={(label) => `Branch: ${label}`}
                   />
                   <Bar dataKey="memberships" fill="#06b6d4" radius={[0, 4, 4, 0]} name="Memberships sold" />
@@ -362,7 +362,7 @@ export default function AdminDashboardPage() {
                   </Pie>
                   <Tooltip
                     contentStyle={{ background: 'var(--theme-bg-card)', border: '1px solid var(--theme-border)', borderRadius: 8 }}
-                    formatter={(value: number | undefined) => [formatCurrency(value ?? 0), 'Revenue']}
+                    formatter={(value) => [formatCurrency(Number(value) || 0), 'Revenue']}
                   />
                   <Legend />
                 </PieChart>
@@ -387,7 +387,7 @@ export default function AdminDashboardPage() {
                   <YAxis tick={{ fill: 'var(--theme-text)', fontSize: 12 }} />
                   <Tooltip
                     contentStyle={{ background: 'var(--theme-bg-card)', border: '1px solid var(--theme-border)', borderRadius: 8 }}
-                    formatter={(value: number | undefined) => [formatCurrency(value ?? 0), 'Revenue']}
+                    formatter={(value) => [formatCurrency(Number(value) || 0), 'Revenue']}
                   />
                   <Line type="monotone" dataKey="sales" stroke="var(--theme-link)" strokeWidth={2} dot={false} name="Revenue" />
                 </LineChart>
@@ -410,7 +410,7 @@ export default function AdminDashboardPage() {
                   <YAxis tick={{ fill: 'var(--theme-text)', fontSize: 12 }} allowDecimals={false} />
                   <Tooltip
                     contentStyle={{ background: 'var(--theme-bg-card)', border: '1px solid var(--theme-border)', borderRadius: 8 }}
-                    formatter={(value: number | undefined) => [formatNumber(value ?? 0), 'Count']}
+                    formatter={(value) => [formatNumber(Number(value) || 0), 'Count']}
                   />
                   <Bar dataKey="count" name="Count" radius={[4, 4, 0, 0]}>
                     {funnelData.map((_, i) => (

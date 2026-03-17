@@ -336,7 +336,7 @@ export default function VendorDashboardPage() {
                   </Pie>
                   <Tooltip
                     contentStyle={{ background: 'var(--theme-bg-card)', border: '1px solid var(--theme-border)', borderRadius: 8 }}
-                    formatter={(value?: number, name?: string) => [value ?? 0, name ?? '']}
+                    formatter={(value, name) => [Number(value) || 0, String(name ?? '')]}
                   />
                   <Legend />
                 </PieChart>
@@ -372,7 +372,7 @@ export default function VendorDashboardPage() {
             <YAxis type="category" dataKey="name" tick={{ fill: 'var(--theme-text)', fontSize: 11 }} width={135} />
             <Tooltip
               contentStyle={{ background: 'var(--theme-bg-card)', border: '1px solid var(--theme-border)', borderRadius: 8 }}
-              formatter={(value: number | undefined) => [value ?? 0, 'Count']}
+              formatter={(value) => [Number(value) || 0, 'Count']}
             />
             <Bar dataKey="count" radius={[0, 4, 4, 0]}>
               {[0, 1, 2, 3, 4, 5, 6].map((i) => (

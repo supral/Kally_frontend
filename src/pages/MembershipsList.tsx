@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { bulkDeleteMemberships, getMemberships, createMembership, importMemberships, recordMembershipUsage, deleteMembership, type ImportRow } from '../api/memberships';
+import { bulkDeleteMemberships, getMemberships, createMembership, importMemberships, recordMembershipUsage, deleteMembership, updateMembership, type ImportRow } from '../api/memberships';
 import { getCustomers } from '../api/customers';
 import { getBranches } from '../api/branches';
 import { getPackages } from '../api/packages';
@@ -411,6 +411,193 @@ export default function MembershipsList() {
     return { rows: out, skippedNoMap, skippedNoCustomer, skippedNoBranchPkg };
   }
 
+  function jsonToImportRowsLegacySessions(
+    rawRows: Record<string, unknown>[],
+    customerList: Customer[]
+  ): {
+    rows: Array<{ importRow: ImportRow; customerId: string; soldAtBranchId: string; usedCredits: number; legacyKey: string }>;
+    skippedNoCustomer: number;
+    skippedNoBranch: number;
+  } {
+    const customerLegacyMap: Record<string, string> = JSON.parse(localStorage.getItem('customerLegacyIdMap') || '{}');
+    const branchLegacyMap: Record<string, string> = JSON.parse(localStorage.getItem('branchLegacyIdMap') || '{}');
+    const branchesByIndex = [...branches].sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+    const customersByIndex = [...customerList].sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+    const str = (v: unknown) => (v != null && v !== '' ? String(v).trim() : '');
+    const num = (v: unknown, fallback = 0) => {
+      const n = Number(str(v));
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const parsePriceFromName = (name: string) => {
+      const m = name.match(/\$([0-9]+(?:\.[0-9]+)?)/);
+      if (!m) return undefined;
+      const p = Number(m[1]);
+      return Number.isFinite(p) ? p : undefined;
+    };
+
+    const out: Array<{ importRow: ImportRow; customerId: string; soldAtBranchId: string; usedCredits: number; legacyKey: string }> = [];
+    let skippedNoCustomer = 0;
+    let skippedNoBranch = 0;
+
+    for (const row of rawRows) {
+      const oldCustomerId = str(row.customer_id);
+      let ourCustomerId = customerLegacyMap[oldCustomerId];
+      if (!ourCustomerId && customersByIndex.length > 0) {
+        const idx = Math.max(0, parseInt(oldCustomerId, 10) - 1);
+        if (idx < customersByIndex.length) ourCustomerId = customersByIndex[idx].id;
+      }
+      if (!ourCustomerId) {
+        skippedNoCustomer++;
+        continue;
+      }
+
+      // Branch: if not present in legacy row, default to first branch (or vendor's branch via backend rules).
+      const oldBranchId = str(row.branch_id);
+      let soldAtBranchId = '';
+      if (oldBranchId) {
+        soldAtBranchId =
+          (branchLegacyMap[oldBranchId] ? String(branchLegacyMap[oldBranchId]) : '') ||
+          (branchesByIndex[Math.max(0, parseInt(oldBranchId, 10) - 1)]?.id || '');
+      }
+      if (!soldAtBranchId) soldAtBranchId = branchesByIndex[0]?.id || '';
+      if (!soldAtBranchId) {
+        skippedNoBranch++;
+        continue;
+      }
+
+      const packageName = str(row.package_name) || str(row.packageName) || '—';
+      const totalCredits = Math.max(1, num(row.total_sessions, 1));
+      const usedCredits = Math.max(0, num(row.used_sessions, 0));
+      const remaining = num(row.remaining_sessions, totalCredits - usedCredits);
+      const packagePrice = parsePriceFromName(packageName) ?? undefined;
+
+      const legacyKey = `${str(row.customer_id)}|${str(row.package_id)}|${packageName}`;
+
+      out.push({
+        importRow: {
+          customerName: str(row.customer_name) || '',
+          customerPhone: '',
+          customerEmail: undefined,
+          totalCredits,
+          soldAtBranch: '',
+          packagePrice,
+          customerPackage: packageName,
+        },
+        customerId: ourCustomerId,
+        soldAtBranchId,
+        usedCredits,
+        legacyKey: remaining < 0 ? legacyKey : legacyKey, // keep stable; remaining can be negative in legacy data
+      });
+    }
+
+    return { rows: out, skippedNoCustomer, skippedNoBranch };
+  }
+
+  function jsonToImportRowsLegacyCm(
+    rawRows: Record<string, unknown>[],
+    customerList: Customer[]
+  ): {
+    rows: Array<{ importRow: ImportRow; customerId: string; soldAtBranchId: string; usedCredits: number; legacyMembershipId: string }>;
+    skippedNoCustomer: number;
+    skippedNoBranch: number;
+  } {
+    const customerLegacyMap: Record<string, string> = JSON.parse(localStorage.getItem('customerLegacyIdMap') || '{}');
+    const customersByIndex = [...customerList].sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+    const str = (v: unknown) => (v != null && v !== '' ? String(v).trim() : '');
+    const num = (v: unknown, fallback = 0) => {
+      const n = Number(str(v));
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const parsePriceFromName = (name: string) => {
+      const m = name.match(/\$([0-9]+(?:\.[0-9]+)?)/);
+      if (!m) return undefined;
+      const p = Number(m[1]);
+      return Number.isFinite(p) ? p : undefined;
+    };
+    const parseTur = (s: string) => {
+      // "5 / 1 / 4" (with optional escaping)
+      const cleaned = s.replace(/\\\//g, '/');
+      const parts = cleaned.split('/').map((p) => p.trim()).filter(Boolean);
+      const total = Math.max(1, num(parts[0], 1));
+      const used = Math.max(0, num(parts[1], 0));
+      const remaining = num(parts[2], Math.max(0, total - used));
+      return { total, used, remaining };
+    };
+
+    const normalizeBranchName = (s: string) =>
+      s
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[^a-z0-9 ]/g, '');
+
+    const branchesByNormName = new Map<string, string>();
+    branches.forEach((b) => {
+      const key = normalizeBranchName(b.name || '');
+      if (key) branchesByNormName.set(key, b.id);
+    });
+
+    const out: Array<{ importRow: ImportRow; customerId: string; soldAtBranchId: string; usedCredits: number; legacyMembershipId: string }> = [];
+    let skippedNoCustomer = 0;
+    let skippedNoBranch = 0;
+
+    for (const row of rawRows) {
+      const legacyMembershipId = str(row.membership_id || row.membershipId || row.id);
+      const oldCustomerId = str(row.customer_id || row.customerId);
+      const soldAtName = str(row.sold_at || row.soldAt || row.branch);
+      const pkgName = str(row.package_name || row.packageName);
+      const tur = str(row.total_used_remaining || row.totalUsedRemaining);
+      if (!oldCustomerId || !soldAtName || !pkgName || !tur) continue;
+
+      let ourCustomerId = customerLegacyMap[oldCustomerId];
+      if (!ourCustomerId && customersByIndex.length > 0) {
+        const idx = Math.max(0, parseInt(oldCustomerId, 10) - 1);
+        if (idx < customersByIndex.length) ourCustomerId = customersByIndex[idx].id;
+      }
+      if (!ourCustomerId) {
+        skippedNoCustomer++;
+        continue;
+      }
+
+      const soldAtNorm = normalizeBranchName(soldAtName);
+      let soldAtBranchId = branchesByNormName.get(soldAtNorm) || '';
+      if (!soldAtBranchId && soldAtNorm) {
+        // Fuzzy fallback: match if one contains the other (handles minor naming differences).
+        for (const [k, v] of branchesByNormName.entries()) {
+          if (k.includes(soldAtNorm) || soldAtNorm.includes(k)) {
+            soldAtBranchId = v;
+            break;
+          }
+        }
+      }
+      if (!soldAtBranchId) {
+        skippedNoBranch++;
+        continue;
+      }
+
+      const { total, used, remaining } = parseTur(tur);
+      const packagePrice = parsePriceFromName(pkgName) ?? undefined;
+
+      out.push({
+        importRow: {
+          customerName: str(row.customer) || str(row.customer_name) || '',
+          customerPhone: '',
+          customerEmail: undefined,
+          totalCredits: total,
+          soldAtBranch: soldAtName,
+          packagePrice,
+          customerPackage: pkgName,
+        },
+        customerId: ourCustomerId,
+        soldAtBranchId,
+        usedCredits: used,
+        legacyMembershipId: legacyMembershipId || `${oldCustomerId}|${pkgName}|${soldAtName}|${total}|${used}|${remaining}`,
+      });
+    }
+
+    return { rows: out, skippedNoCustomer, skippedNoBranch };
+  }
+
   async function handleImportFile(file: File) {
     setImportResult(null);
     setError('');
@@ -427,6 +614,108 @@ export default function MembershipsList() {
         }
         const freshRes = await getCustomers();
         const customerList = (freshRes.success && freshRes.customers) ? freshRes.customers : customers;
+
+        // "cm.json" style export: membership_id, customer_id, customer, total_used_remaining, package_name, sold_at, status
+        const looksLikeCm = rawRows.some((r) => r && typeof r === 'object' && ('membership_id' in r || 'total_used_remaining' in r || 'sold_at' in r));
+        if (looksLikeCm) {
+          // Ensure branches are loaded before we try to resolve sold_at → branchId.
+          if (branches.length === 0) {
+            const br = await getBranches({ all: true });
+            if (br.success && br.branches) setBranches(br.branches);
+          }
+
+          const { rows: importRows, skippedNoCustomer, skippedNoBranch } = jsonToImportRowsLegacyCm(rawRows, customerList);
+          if (importRows.length === 0) {
+            const parts: string[] = [];
+            if (skippedNoCustomer > 0) parts.push(`${skippedNoCustomer} rows: customer_id not found (import customers first, or ensure IDs match)`);
+            if (skippedNoBranch > 0) parts.push(`${skippedNoBranch} rows: sold_at branch not found (create branches first, names must match)`);
+            setError(`No valid rows from ${rawRows.length} in file. ${parts.join('; ') || 'Unknown format.'}`);
+            return;
+          }
+
+          setImporting(true);
+          const membershipLegacyMap: Record<string, string> = JSON.parse(localStorage.getItem('membershipLegacyIdMap') || '{}');
+          let imported = 0;
+          for (const { importRow, customerId, soldAtBranchId, usedCredits, legacyMembershipId } of importRows) {
+            const res = await createMembership({
+              customerId,
+              totalCredits: importRow.totalCredits,
+              soldAtBranchId: isAdmin ? soldAtBranchId : undefined,
+              customerPackage: importRow.customerPackage,
+              customerPackagePrice: importRow.packagePrice ?? 0,
+              discountAmount: 0,
+            });
+            const newId = (res as unknown as { membership?: { id?: string } }).membership?.id;
+            if (res.success && newId) {
+              membershipLegacyMap[String(legacyMembershipId)] = newId;
+              imported++;
+              const cappedUsed = Math.max(0, Math.min(usedCredits, importRow.totalCredits));
+              const statusUpper = String((rawRows as unknown as Array<Record<string, unknown>>).find((x) => String(x.membership_id || x.membershipId || x.id) === String(legacyMembershipId))?.status || '').toUpperCase();
+              const statusUpdate = cappedUsed >= importRow.totalCredits ? 'used' : (statusUpper === 'INACTIVE' ? 'expired' : undefined);
+              // eslint-disable-next-line no-await-in-loop
+              await updateMembership(newId, { usedCredits: cappedUsed, ...(statusUpdate ? { status: statusUpdate } : {}) });
+            }
+          }
+          if (Object.keys(membershipLegacyMap).length > 0) localStorage.setItem('membershipLegacyIdMap', JSON.stringify(membershipLegacyMap));
+          setImporting(false);
+          setImportResult({ imported, createdCustomers: 0, errors: [] });
+          if (imported > 0) {
+            getMemberships({ branchId: branchId || undefined, status: status || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined }).then((r) => {
+              if (r.success && 'memberships' in r) setMemberships((r as { memberships: Membership[] }).memberships);
+            });
+          }
+          return;
+        }
+
+        // Legacy "sessions" style export (like your file: customer_id, package_name, total_sessions, used_sessions, remaining_sessions)
+        // should import memberships AND set used credits so the list shows correct totals immediately.
+        const looksLikeLegacySessions = rawRows.some((r) => r && typeof r === 'object' && ('total_sessions' in r || 'used_sessions' in r || 'remaining_sessions' in r));
+        if (looksLikeLegacySessions) {
+          const { rows: importRows, skippedNoCustomer, skippedNoBranch } = jsonToImportRowsLegacySessions(rawRows, customerList);
+          if (importRows.length === 0) {
+            const parts: string[] = [];
+            if (skippedNoCustomer > 0) parts.push(`${skippedNoCustomer} rows: customer_id not found (import customers first, or ensure IDs match)`);
+            if (skippedNoBranch > 0) parts.push(`${skippedNoBranch} rows: no branch available (create branches first)`);
+            setError(`No valid rows from ${rawRows.length} in file. ${parts.join('; ') || 'Unknown format.'}`);
+            return;
+          }
+
+          setImporting(true);
+          const membershipLegacyMap: Record<string, string> = JSON.parse(localStorage.getItem('membershipLegacyIdMap') || '{}');
+          let imported = 0;
+          for (const { importRow, customerId, soldAtBranchId, usedCredits, legacyKey } of importRows) {
+            const res = await createMembership({
+              customerId,
+              totalCredits: importRow.totalCredits,
+              soldAtBranchId: isAdmin ? soldAtBranchId || undefined : undefined,
+              customerPackage: importRow.customerPackage,
+              customerPackagePrice: importRow.packagePrice ?? 0,
+              discountAmount: 0,
+            });
+            const newId = (res as unknown as { membership?: { id?: string } }).membership?.id;
+            if (res.success && newId) {
+              membershipLegacyMap[legacyKey] = newId;
+              imported++;
+
+              // Apply used credits so UI shows correct Total/Used/Remaining.
+              const cappedUsed = Math.max(0, Math.min(usedCredits, importRow.totalCredits));
+              const statusUpdate = cappedUsed >= importRow.totalCredits ? 'used' : undefined;
+              // eslint-disable-next-line no-await-in-loop
+              await updateMembership(newId, { usedCredits: cappedUsed, ...(statusUpdate ? { status: statusUpdate } : {}) });
+            }
+          }
+          if (Object.keys(membershipLegacyMap).length > 0) localStorage.setItem('membershipLegacyIdMap', JSON.stringify(membershipLegacyMap));
+          setImporting(false);
+          setImportResult({ imported, createdCustomers: 0, errors: [] });
+          if (imported > 0) {
+            getMemberships({ branchId: branchId || undefined, status: status || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined }).then((r) => {
+              if (r.success && 'memberships' in r) setMemberships((r as { memberships: Membership[] }).memberships);
+            });
+          }
+          return;
+        }
+
+        // Existing JSON import path (expects customer_id/branch_id/package_id mapping)
         const { rows: importRows, skippedNoMap, skippedNoCustomer, skippedNoBranchPkg } = jsonToImportRows(rawRows, customerList);
         if (importRows.length === 0) {
           const parts: string[] = [];

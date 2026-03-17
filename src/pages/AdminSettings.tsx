@@ -44,6 +44,24 @@ export default function AdminSettings() {
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [passwordSaving, setPasswordSaving] = useState(false);
 
+  const [legacyCustomersFileName, setLegacyCustomersFileName] = useState<string>('');
+  const [legacyCustomersImporting, setLegacyCustomersImporting] = useState(false);
+  const [legacyCustomersRows, setLegacyCustomersRows] = useState<number>(0);
+  const [legacyCustomersParsed, setLegacyCustomersParsed] = useState<unknown>(null);
+  const [legacyDataImporting, setLegacyDataImporting] = useState(false);
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogTitle, setDialogTitle] = useState('');
+  const [dialogBody, setDialogBody] = useState('');
+  const [dialogConfirmText, setDialogConfirmText] = useState('Confirm');
+  const [dialogAction, setDialogAction] = useState<
+    | null
+    | 'importCustomers'
+    | 'importAll'
+    | 'backfillCustomerBranches'
+    | 'backfillBranchAddresses'
+  >(null);
+
   useEffect(() => {
     getSettings().then((r) => {
       setSettingsLoading(false);
@@ -284,6 +302,158 @@ export default function AdminSettings() {
     }
   };
 
+  const extractRows = (parsed: unknown): Record<string, unknown>[] => {
+    if (Array.isArray(parsed)) {
+      const tableObj = parsed.find((item) => item && typeof item === 'object' && (item as { type?: string }).type === 'table' && Array.isArray((item as { data?: unknown[] }).data));
+      if (tableObj) return (tableObj as { data: Record<string, unknown>[] }).data;
+      return parsed as Record<string, unknown>[];
+    }
+    if (parsed && typeof parsed === 'object') {
+      const o = parsed as Record<string, unknown>;
+      if (Array.isArray(o.data)) return o.data as Record<string, unknown>[];
+    }
+    return [];
+  };
+
+  const handlePickLegacyCustomersFile = async (file: File) => {
+    setMessage('');
+    setMessageType(null);
+    setLegacyCustomersFileName(file.name);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const rows = extractRows(parsed);
+      setLegacyCustomersParsed(parsed);
+      setLegacyCustomersRows(rows.length);
+      if (rows.length === 0) {
+        setMessageType('error');
+        setMessage('No rows found in this JSON file.');
+      }
+    } catch (e) {
+      setLegacyCustomersParsed(null);
+      setLegacyCustomersRows(0);
+      setMessageType('error');
+      setMessage(e instanceof Error ? e.message : 'Invalid JSON file.');
+    }
+  };
+
+  const doImportLegacyCustomers = async () => {
+    if (!legacyCustomersParsed) return;
+    setLegacyCustomersImporting(true);
+    setMessage('');
+    setMessageType(null);
+    const r = await apiRequest<{ imported: number; updated: number; legacyIdMap?: Record<string, string> }>('/customers/import-legacy', {
+      method: 'POST',
+      body: JSON.stringify({ data: legacyCustomersParsed }),
+    });
+    setLegacyCustomersImporting(false);
+    if (r.success && ('imported' in r)) {
+      const rr = r as unknown as { imported: number; updated: number; legacyIdMap?: Record<string, string> };
+      const existingMap = JSON.parse(localStorage.getItem('customerLegacyIdMap') || '{}') as Record<string, string>;
+      const nextMap = { ...existingMap, ...(rr.legacyIdMap || {}) };
+      localStorage.setItem('customerLegacyIdMap', JSON.stringify(nextMap));
+      setMessageType('success');
+      setMessage(`Imported ${rr.imported} customer(s), updated ${rr.updated} customer(s).`);
+    } else {
+      setMessageType('error');
+      setMessage((r as { message?: string }).message || 'Failed to import legacy customers.');
+    }
+  };
+
+  const doImportLegacyAll = async () => {
+    if (!legacyCustomersParsed) return;
+    setLegacyDataImporting(true);
+    setMessage('');
+    setMessageType(null);
+    const r = await apiRequest<{
+      customers: { imported: number; updated: number };
+      packages: { upserted: number };
+      branches: { ensured: number };
+      memberships: { upserted: number };
+      legacyIdMap?: Record<string, string>;
+    }>('/settings/import-legacy-data', {
+      method: 'POST',
+      body: JSON.stringify({ data: legacyCustomersParsed }),
+    });
+    setLegacyDataImporting(false);
+    if (r.success && 'customers' in r) {
+      const rr = r as unknown as { customers: { imported: number; updated: number }; memberships: { upserted: number }; packages: { upserted: number }; legacyIdMap?: Record<string, string> };
+      const existingMap = JSON.parse(localStorage.getItem('customerLegacyIdMap') || '{}') as Record<string, string>;
+      const nextMap = { ...existingMap, ...(rr.legacyIdMap || {}) };
+      localStorage.setItem('customerLegacyIdMap', JSON.stringify(nextMap));
+      setMessageType('success');
+      setMessage(`Imported customers: ${rr.customers.imported}, updated: ${rr.customers.updated}. Packages upserted: ${rr.packages.upserted}. Memberships upserted: ${rr.memberships.upserted}.`);
+    } else {
+      setMessageType('error');
+      setMessage((r as { message?: string }).message || 'Failed to import legacy data.');
+    }
+  };
+
+  const doBackfillCustomerBranches = async () => {
+    setMessage('');
+    setMessageType(null);
+    const r = await apiRequest<{ updated: number }>('/customers/backfill-branches', { method: 'POST' });
+    if (r.success && 'updated' in r) {
+      const rr = r as unknown as { updated: number };
+      setMessageType('success');
+      setMessage(`Backfilled branch for ${rr.updated} customer(s).`);
+    } else {
+      setMessageType('error');
+      setMessage((r as { message?: string }).message || 'Failed to backfill customer branches.');
+    }
+  };
+
+  const doBackfillBranchAddresses = async () => {
+    setMessage('');
+    setMessageType(null);
+    const r = await apiRequest<{ updated: number }>('/settings/backfill-branch-addresses', { method: 'POST' });
+    if (r.success && 'updated' in r) {
+      const rr = r as unknown as { updated: number };
+      setMessageType('success');
+      setMessage(`Updated ${rr.updated} branch(es) with address/zip.`);
+    } else {
+      setMessageType('error');
+      setMessage((r as { message?: string }).message || 'Failed to backfill branch addresses.');
+    }
+  };
+
+  const openDialog = (action: NonNullable<typeof dialogAction>) => {
+    if (action === 'importCustomers') {
+      setDialogTitle('Import legacy customers?');
+      setDialogBody('This will upsert customers by phone number. Existing customers with the same phone will be updated.');
+      setDialogConfirmText('Import customers');
+    } else if (action === 'importAll') {
+      setDialogTitle('Import customers, memberships, and packages?');
+      setDialogBody('This will import/update Customers, Branches, Packages, and Memberships using the selected JSON file.');
+      setDialogConfirmText('Import all');
+    } else if (action === 'backfillCustomerBranches') {
+      setDialogTitle('Backfill customer branches?');
+      setDialogBody('This fills the Customers page Branch column based on the sold-at branch from memberships.');
+      setDialogConfirmText('Backfill');
+    } else if (action === 'backfillBranchAddresses') {
+      setDialogTitle('Backfill branch addresses & zip codes?');
+      setDialogBody('This fills Branch address and zip code using the provided branch list.');
+      setDialogConfirmText('Backfill');
+    }
+    setDialogAction(action);
+    setDialogOpen(true);
+  };
+
+  const closeDialog = () => {
+    setDialogOpen(false);
+    setDialogAction(null);
+  };
+
+  const confirmDialog = async () => {
+    const action = dialogAction;
+    closeDialog();
+    if (!action) return;
+    if (action === 'importCustomers') return doImportLegacyCustomers();
+    if (action === 'importAll') return doImportLegacyAll();
+    if (action === 'backfillCustomerBranches') return doBackfillCustomerBranches();
+    if (action === 'backfillBranchAddresses') return doBackfillBranchAddresses();
+  };
+
   const toastEl = message ? (
     <div
       role="alert"
@@ -302,9 +472,46 @@ export default function AdminSettings() {
     </div>
   ) : null;
 
+  const dialogEl = dialogOpen ? (
+    <div
+      className="vendor-modal-backdrop"
+      role="presentation"
+      onClick={closeDialog}
+      style={{ zIndex: 2000 }}
+    >
+      <div
+        className="vendor-modal block-confirm-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={dialogTitle}
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 560 }}
+      >
+        <div className="vendor-modal-header block-confirm-header">
+          <h2 style={{ margin: 0 }}>{dialogTitle}</h2>
+          <button type="button" className="vendor-modal-close" onClick={closeDialog} aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div className="block-confirm-body">
+          <p className="block-confirm-message" style={{ marginTop: 0 }}>{dialogBody}</p>
+          <div className="block-confirm-actions">
+            <button type="button" className="block-confirm-cancel" onClick={closeDialog}>
+              Cancel
+            </button>
+            <button type="button" className="block-confirm-ok" onClick={confirmDialog}>
+              {dialogConfirmText}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="dashboard-content settings-page">
       {toastEl != null && createPortal(toastEl, document.body)}
+      {dialogEl != null && createPortal(dialogEl, document.body)}
       <header className="page-hero settings-page-hero">
         <h1 className="page-hero-title">Settings</h1>
         <p className="page-hero-subtitle">
@@ -570,6 +777,74 @@ export default function AdminSettings() {
                 </button>
               </form>
             )}
+          </div>
+
+          <div className="settings-block settings-block-divider">
+            <h3 className="settings-block-heading">Import legacy customers (JSON)</h3>
+            <p className="settings-block-desc">
+              Upload your old-system customer JSON export (PHPMyAdmin export supported). This will import customers into this system and
+              create a legacy ID mapping used by other imports.
+            </p>
+            <div className="settings-form">
+              <label className="settings-label">
+                <span>JSON file</span>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  className="settings-input"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = '';
+                    if (f) handlePickLegacyCustomersFile(f);
+                  }}
+                />
+              </label>
+              {legacyCustomersFileName && (
+                <p className="text-muted" style={{ marginTop: '-0.25rem' }}>
+                  Selected: <strong>{legacyCustomersFileName}</strong> ({legacyCustomersRows} row(s))
+                </p>
+              )}
+              <div className="settings-btn-row">
+                <button
+                  type="button"
+                  className="settings-btn settings-btn-primary"
+                  disabled={!legacyCustomersParsed || legacyCustomersImporting || legacyCustomersRows === 0}
+                  onClick={() => openDialog('importCustomers')}
+                >
+                  {legacyCustomersImporting ? 'Importing…' : 'Import customers'}
+                </button>
+                <button
+                  type="button"
+                  className="settings-btn settings-btn-primary"
+                  disabled={!legacyCustomersParsed || legacyDataImporting || legacyCustomersRows === 0}
+                  onClick={() => openDialog('importAll')}
+                  title="Also imports Packages and Memberships from this JSON (if those fields exist)."
+                >
+                  {legacyDataImporting ? 'Importing…' : 'Import customers + memberships + packages'}
+                </button>
+              </div>
+              <p className="text-muted" style={{ marginTop: '0.5rem' }}>
+                Import rule: customers are <strong>upserted by phone</strong>. Legacy IDs are stored in local storage as <code>customerLegacyIdMap</code>.
+              </p>
+              <div className="settings-btn-row" style={{ marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="settings-btn"
+                  onClick={() => openDialog('backfillCustomerBranches')}
+                  title="Fix empty Branch column for already-imported customers."
+                >
+                  Backfill customer branches from memberships
+                </button>
+                <button
+                  type="button"
+                  className="settings-btn"
+                  onClick={() => openDialog('backfillBranchAddresses')}
+                  title="Fill Branch addresses + zip codes."
+                >
+                  Backfill branch addresses & zip codes
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="settings-block">
