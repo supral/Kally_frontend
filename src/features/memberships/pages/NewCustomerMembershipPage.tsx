@@ -6,10 +6,10 @@ import { getBranches } from '../../../api/branches';
 import { getPackages } from '../../../api/packages';
 import { useAuth } from '../../../auth/hooks/useAuth';
 import { useBranch } from '../../../hooks/useBranch';
-import { formatCurrency } from '../../../utils/money';
 import type { Branch } from '../../../types/crm';
 import type { PackageItem } from '../../../api/packages';
 import { initialNamePhoneFromUrl } from '../utils/matchCustomersBySearch';
+import MembershipPackageCombobox from '../components/MembershipPackageCombobox';
 
 export default function NewCustomerMembershipPage() {
   const { user } = useAuth();
@@ -31,7 +31,10 @@ export default function NewCustomerMembershipPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const selectedPackage = useMemo(() => packages.find((p) => p.id === packageId), [packages, packageId]);
+  const selectedPackage = useMemo(
+    () => packages.find((p) => String(p.id) === String(packageId)),
+    [packages, packageId]
+  );
 
   useEffect(() => {
     getBranches({ all: true }).then((r) => r.success && r.branches && setBranches(r.branches || []));
@@ -164,14 +167,13 @@ export default function NewCustomerMembershipPage() {
           <h2 className="page-section-title" style={{ fontSize: '1.1rem' }}>Membership</h2>
           <label>
             <span>Package *</span>
-            <select value={packageId} onChange={(e) => setPackageId(e.target.value)} className="settings-input" required>
-              <option value="">— Select package</option>
-              {packages.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} — {formatCurrency(p.price)} ({p.totalSessions ?? 1} sessions)
-                </option>
-              ))}
-            </select>
+            <MembershipPackageCombobox
+              packages={packages}
+              packageId={packageId}
+              onPackageIdChange={setPackageId}
+              disabled={submitting}
+              inputClassName="settings-input"
+            />
           </label>
           <label>
             <span>Package price ($) *</span>

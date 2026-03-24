@@ -1,7 +1,31 @@
 import type { Customer } from '../../../types/common';
 
+type Loose = Customer & { customer_name?: string; customerName?: string; contact?: string; mobile?: string };
+
 export function digitsOnly(s: string): string {
   return String(s || '').replace(/\D/g, '');
+}
+
+/** Resolved display name (canonical + common legacy import fields). */
+export function customerResolvedName(c: Customer): string {
+  const x = c as Loose;
+  const raw = (c.name || x.customer_name || x.customerName || '').trim();
+  return raw || (c.membershipCardId ? String(c.membershipCardId) : '') || 'Customer';
+}
+
+/** Phone digits for matching (canonical + legacy). */
+export function customerPhoneDigits(c: Customer): string {
+  const x = c as Loose;
+  return digitsOnly(c.phone ?? x.contact ?? x.mobile ?? '');
+}
+
+/** Single line for picker: Name — phone (never only digits when we have a name). */
+export function customerPickerLine(c: Customer): string {
+  const name = customerResolvedName(c);
+  const x = c as Loose;
+  const phoneRaw = (c.phone || x.contact || x.mobile || '').trim();
+  const phone = phoneRaw || '—';
+  return `${name} — ${phone}`;
 }
 
 /** Match customers by name, email, card ID, or phone (phone needs at least 3 digits in the query). */
@@ -12,10 +36,10 @@ export function matchCustomersBySearch(query: string, customers: Customer[]): Cu
   const qDigits = digitsOnly(raw);
   const out: Customer[] = [];
   for (const c of customers) {
-    const name = (c.name ?? '').toLowerCase();
+    const name = customerResolvedName(c).toLowerCase();
     const email = (c.email ?? '').toLowerCase();
     const cardId = (c.membershipCardId ?? '').toLowerCase();
-    const phoneDigits = digitsOnly(c.phone ?? '');
+    const phoneDigits = customerPhoneDigits(c);
     if (name.includes(q)) {
       out.push(c);
       continue;

@@ -42,6 +42,7 @@ export default function SettlementReportPage() {
   const [settings, setSettings] = useState<{
     showBulkSettleSettlementsToAdmin?: boolean;
     showSettlementsExportToAdmin?: boolean;
+    showMarkSettledToVendor?: boolean;
   } | null>(null);
   const [selectedSettlementIds, setSelectedSettlementIds] = useState<Set<string>>(() => new Set());
   const [bulkSettling, setBulkSettling] = useState(false);
@@ -87,11 +88,18 @@ export default function SettlementReportPage() {
   }, [fetchSettlements]);
 
   useEffect(() => {
-    if (!isAdmin) return;
     getSettings().then((r) => {
-      if (r.success && r.settings) setSettings(r.settings as { showBulkSettleSettlementsToAdmin?: boolean });
+      if (r.success && r.settings) {
+        setSettings(
+          r.settings as {
+            showBulkSettleSettlementsToAdmin?: boolean;
+            showSettlementsExportToAdmin?: boolean;
+            showMarkSettledToVendor?: boolean;
+          }
+        );
+      }
     });
-  }, [isAdmin]);
+  }, []);
 
   useEffect(() => {
     getBranches({ all: true }).then((r) => r.success && r.branches && setBranches(r.branches || []));
@@ -132,7 +140,10 @@ export default function SettlementReportPage() {
   const totalPages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE));
   const currentPage = Math.min(Math.max(1, page), totalPages);
   const paginatedSettlements = filteredSettlements.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const canBulkSettle = isAdmin && settings?.showBulkSettleSettlementsToAdmin;
+  const canVendorMarkSettled = !isAdmin && user?.role === 'vendor' && settings?.showMarkSettledToVendor === true;
+  const canBulkSettle =
+    (isAdmin && settings?.showBulkSettleSettlementsToAdmin === true) || canVendorMarkSettled;
+  const showSettleActionColumn = isAdmin || canVendorMarkSettled;
 
   useEffect(() => {
     setPage(1);
@@ -604,7 +615,7 @@ export default function SettlementReportPage() {
                         <th>Reason</th>
                         <th>Status</th>
                         <th>Date</th>
-                        {isAdmin && <th>Action</th>}
+                        {showSettleActionColumn && <th>Action</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -632,7 +643,7 @@ export default function SettlementReportPage() {
                           </span>
                         </td>
                         <td>{s.createdAt ? new Date(s.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '—'}</td>
-                        {isAdmin && (
+                        {showSettleActionColumn && (
                           <td>
                             {(s.status || '').toLowerCase() === 'pending' ? (
                               <button

@@ -7196,18 +7196,35 @@
 /* Memberships page */
 .memberships-page-hero {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+
+.memberships-page-hero-main {
+  width: 100%;
+  min-width: 0;
+}
+
+.memberships-page-hero-create-wrap {
+  margin-top: 1rem;
+  width: 100%;
 }
 
 .memberships-create-btn {
-  flex-shrink: 0;
-  padding: 0.6rem 1.25rem;
-  font-size: 0.9rem;
+  width: 100%;
+  max-width: 100%;
+  padding: 0.65rem 1.25rem;
+  font-size: 0.95rem;
   font-weight: 600;
-  white-space: nowrap;
+  white-space: normal;
+  text-align: center;
+}
+
+.memberships-form-submit-btn {
+  width: 100%;
+  max-width: 100%;
+  margin-top: 0.25rem;
 }
 
 .memberships-create-form-card {

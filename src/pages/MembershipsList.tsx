@@ -10,7 +10,15 @@ import { formatCurrency } from '../utils/money';
 import type { Membership, Branch } from '../types/crm';
 import type { Customer } from '../types/common';
 import type { PackageItem } from '../api/packages';
-import { matchCustomersBySearch, newCustomerMembershipSearchParams, digitsOnly } from '../features/memberships/utils/matchCustomersBySearch';
+import {
+  matchCustomersBySearch,
+  newCustomerMembershipSearchParams,
+  digitsOnly,
+  customerPickerLine,
+  customerResolvedName,
+  customerPhoneDigits,
+} from '../features/memberships/utils/matchCustomersBySearch';
+import MembershipPackageCombobox from '../features/memberships/components/MembershipPackageCombobox';
 
 const MEMBERSHIPS_LIST_SEARCH_KEY = 'kelly:memberships:listSearch';
 
@@ -73,25 +81,53 @@ export default function MembershipsList() {
   const isAdmin = user?.role === 'admin';
   const PAGE_SIZE = 100;
 
-  const selectedPackage = useMemo(() => packages.find((p) => p.id === createPackageId), [packages, createPackageId]);
+  /** Merge API customers with customers embedded on current membership rows (fixes gaps if list is stale). */
+  const customersUnified = useMemo(() => {
+    const byId = new Map<string, Customer>();
+    for (const c of customers) {
+      byId.set(String(c.id), c);
+    }
+    for (const m of memberships) {
+      const mc = m.customer;
+      if (!mc?.id) continue;
+      const id = String(mc.id);
+      if (!byId.has(id)) {
+        byId.set(id, {
+          id,
+          name: mc.name,
+          phone: mc.phone ?? '',
+          email: mc.email,
+          membershipCardId: mc.membershipCardId,
+        });
+      }
+    }
+    return Array.from(byId.values());
+  }, [customers, memberships]);
 
-  const selectedCustomer = useMemo(() => customers.find((c) => c.id === createCustomerId), [customers, createCustomerId]);
+  const selectedPackage = useMemo(
+    () => packages.find((p) => String(p.id) === String(createPackageId)),
+    [packages, createPackageId]
+  );
+
   const createCustomerSearchLower = createCustomerSearch.trim().toLowerCase();
+  const createCustDigits = createCustomerSearch.replace(/\D/g, '');
+  const looksPhoneLocal = createCustDigits.length >= 3 && !/[a-zA-Z]/.test(createCustomerSearch);
   const filteredCreateCustomers = useMemo(() => {
-    if (!createCustomerSearchLower) return customers;
-    return customers.filter((c) => {
-      const name = (c.name ?? '').toLowerCase();
+    if (!createCustomerSearchLower) return customersUnified;
+    return customersUnified.filter((c) => {
+      const name = customerResolvedName(c).toLowerCase();
       const phone = (c.phone ?? '').toLowerCase();
+      const phoneDig = customerPhoneDigits(c);
       const email = (c.email ?? '').toLowerCase();
       const cardId = (c.membershipCardId ?? '').toLowerCase();
       return (
         name.includes(createCustomerSearchLower) ||
-        phone.includes(createCustomerSearchLower) ||
+        (looksPhoneLocal ? phoneDig.includes(createCustDigits) : phone.includes(createCustomerSearchLower)) ||
         email.includes(createCustomerSearchLower) ||
         cardId.includes(createCustomerSearchLower)
       );
     });
-  }, [customers, createCustomerSearchLower]);
+  }, [customersUnified, createCustomerSearchLower, createCustDigits, looksPhoneLocal]);
 
   useEffect(() => {
     function handleClickOutside(ev: MouseEvent) {
@@ -147,8 +183,16 @@ export default function MembershipsList() {
   const searchTrimmed = searchQuery.trim();
   const matchingCustomers = useMemo(() => {
     if (!customersReady || !searchTrimmed) return [];
-    return matchCustomersBySearch(searchTrimmed, customers);
-  }, [customersReady, searchTrimmed, customers]);
+    return matchCustomersBySearch(searchTrimmed, customersUnified);
+  }, [customersReady, searchTrimmed, customersUnified]);
+
+  const selectedCustomer = useMemo(() => {
+    if (!createCustomerId) return undefined;
+    const cid = String(createCustomerId);
+    const fromList = customersUnified.find((c) => String(c.id) === cid);
+    if (fromList) return fromList;
+    return matchingCustomers.find((c) => String(c.id) === cid);
+  }, [customersUnified, createCustomerId, matchingCustomers]);
 
   const getMembershipsListReturnTo = useCallback(() => {
     const p = new URLSearchParams();
@@ -173,16 +217,18 @@ export default function MembershipsList() {
 
   const applySearchToCreateForm = useCallback(() => {
     const t = searchQuery.trim();
+    if (!customersReady) return;
+    if (matchingCustomers.length === 1) {
+      setCreateCustomerId(String(matchingCustomers[0].id));
+      setCreateCustomerSearch('');
+      setCreateCustomerDropdownOpen(false);
+      return;
+    }
     if (digitsOnly(t).length >= 3) {
       setCreateCustomerSearch(t);
       setCreateCustomerDropdownOpen(true);
     }
-    if (matchingCustomers.length === 1) {
-      setCreateCustomerId(matchingCustomers[0].id);
-      setCreateCustomerSearch('');
-      setCreateCustomerDropdownOpen(false);
-    }
-  }, [searchQuery, matchingCustomers]);
+  }, [searchQuery, matchingCustomers, customersReady]);
 
   useEffect(() => {
     try {
@@ -194,13 +240,30 @@ export default function MembershipsList() {
 
   const openCreateMembershipForCustomer = useCallback((customerId: string) => {
     setShowCreateForm(true);
-    setCreateCustomerId(customerId);
+    setCreateCustomerId(String(customerId));
     setCreateCustomerSearch('');
     setCreateCustomerDropdownOpen(false);
     queueMicrotask(() => {
       document.querySelector('.memberships-create-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }, []);
+
+  /** If list search is a unique phone/name match, bind customer so the field shows name — phone, not digits only. */
+  useEffect(() => {
+    if (!showCreateForm || !customersReady) return;
+    const t = searchQuery.trim();
+    if (!t) return;
+    const matches = matchCustomersBySearch(t, customersUnified);
+    if (matches.length !== 1) return;
+    const id = String(matches[0].id);
+    if (String(createCustomerId) === id) return;
+    const fieldMatchesListSearch = createCustomerSearch.trim() === t;
+    if (!createCustomerId || fieldMatchesListSearch) {
+      setCreateCustomerId(id);
+      setCreateCustomerSearch('');
+      setCreateCustomerDropdownOpen(false);
+    }
+  }, [showCreateForm, customersReady, searchQuery, customersUnified, createCustomerId, createCustomerSearch]);
 
   const toggleSelected = useCallback((id: string) => {
     setSelectedMembershipIds((prev) => {
@@ -1088,39 +1151,29 @@ export default function MembershipsList() {
   return (
     <div className="dashboard-content memberships-page">
       <header className="page-hero memberships-page-hero">
-        <div>
+        <div className="memberships-page-hero-main">
           <h1 className="page-hero-title">Memberships</h1>
           <p className="page-hero-subtitle">Assign memberships to customers. View and use credits below.</p>
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-          <button
-            type="button"
-            className="auth-submit memberships-create-btn"
-            onClick={() => {
-              setShowCreateForm((prev) => {
-                const next = !prev;
-                if (next) queueMicrotask(() => applySearchToCreateForm());
-                return next;
-              });
-            }}
-          >
-            {showCreateForm ? 'Cancel' : 'Create new membership'}
-          </button>
-          {searchTrimmed && (
+          <div className="memberships-page-hero-create-wrap">
             <button
               type="button"
-              className="filter-btn"
+              className="auth-submit memberships-create-btn"
               onClick={() => {
-                setShowCreateForm(true);
-                applySearchToCreateForm();
-                queueMicrotask(() => {
-                  document.querySelector('.memberships-create-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                setShowCreateForm((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    queueMicrotask(() => applySearchToCreateForm());
+                    setTimeout(() => {
+                      document.querySelector('.memberships-create-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }, 0);
+                  }
+                  return next;
                 });
               }}
             >
-              Add another membership for this search
+              {showCreateForm ? 'Cancel' : 'Create new membership'}
             </button>
-          )}
+          </div>
         </div>
       </header>
 
@@ -1134,7 +1187,7 @@ export default function MembershipsList() {
                   ref={createCustomerInputRef}
                   type="text"
                   className="create-membership-customer-input"
-                  value={createCustomerId ? (selectedCustomer ? `${selectedCustomer.name} — ${selectedCustomer.phone}` : '') : createCustomerSearch}
+                  value={createCustomerId ? (selectedCustomer ? customerPickerLine(selectedCustomer) : '') : createCustomerSearch}
                   onChange={(e) => {
                     setCreateCustomerId('');
                     setCreateCustomerSearch(e.target.value);
@@ -1166,18 +1219,18 @@ export default function MembershipsList() {
                       <li className="create-membership-customer-empty">No customers match</li>
                     ) : (
                       filteredCreateCustomers.slice(0, 100).map((c) => (
-                        <li key={c.id} role="option" aria-selected={createCustomerId === c.id}>
+                        <li key={c.id} role="option" aria-selected={String(createCustomerId) === String(c.id)}>
                           <button
                             type="button"
                             className="dropdown-item"
                             onClick={() => {
-                              setCreateCustomerId(c.id);
+                              setCreateCustomerId(String(c.id));
                               setCreateCustomerSearch('');
                               setCreateCustomerDropdownOpen(false);
                               createCustomerInputRef.current?.blur();
                             }}
                           >
-                            {c.name} — {c.phone}{c.membershipCardId ? ` (${c.membershipCardId})` : ''}
+                            {customerPickerLine(c)}{c.membershipCardId ? ` (${c.membershipCardId})` : ''}
                           </button>
                         </li>
                       ))
@@ -1201,19 +1254,21 @@ export default function MembershipsList() {
             <p style={{ fontSize: '0.9rem', color: 'var(--theme-text)', marginBottom: '0.75rem' }}>Package (required)</p>
             <label>
               <span>Package <strong>*</strong></span>
-              <select value={createPackageId} onChange={(e) => setCreatePackageId(e.target.value)} required>
-                <option value="">— Select package</option>
-                {packages.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name} — {formatCurrency(p.price)} ({p.totalSessions ?? 1} sessions)</option>
-                ))}
-              </select>
+              <MembershipPackageCombobox
+                packages={packages}
+                packageId={createPackageId}
+                onPackageIdChange={setCreatePackageId}
+                disabled={createSubmitting}
+              />
             </label>
             {createPackageId && selectedPackage && (
               <p className="form-hint" style={{ marginTop: 0, marginBottom: 0 }}>
                 This package includes {(selectedPackage.totalSessions ?? 1)} session{(selectedPackage.totalSessions ?? 1) !== 1 ? 's' : ''}.
               </p>
             )}
-            <button type="submit" className="auth-submit" disabled={createSubmitting}>{createSubmitting ? 'Creating…' : 'Create membership'}</button>
+            <button type="submit" className="auth-submit memberships-form-submit-btn" disabled={createSubmitting}>
+              {createSubmitting ? 'Creating…' : 'Create membership'}
+            </button>
           </form>
         </section>
       )}

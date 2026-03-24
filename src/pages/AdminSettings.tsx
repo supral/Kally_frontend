@@ -40,6 +40,7 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
   const [showBulkDeletePackagesToAdmin, setShowBulkDeletePackagesToAdmin] = useState<boolean>(false);
   const [showBulkDeleteMembershipsToAdmin, setShowBulkDeleteMembershipsToAdmin] = useState<boolean>(false);
   const [showBulkSettleSettlementsToAdmin, setShowBulkSettleSettlementsToAdmin] = useState<boolean>(false);
+  const [showMarkSettledToVendor, setShowMarkSettledToVendor] = useState<boolean>(false);
   const [showPackageActionsToVendor, setShowPackageActionsToVendor] = useState<boolean>(false);
   const [showEditDeleteActionsToVendor, setShowEditDeleteActionsToVendor] = useState<boolean>(false);
   const [showServiceActionsToVendor, setShowServiceActionsToVendor] = useState<boolean>(false);
@@ -101,6 +102,7 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
         setShowBulkDeletePackagesToAdmin(r.settings.showBulkDeletePackagesToAdmin === true);
         setShowBulkDeleteMembershipsToAdmin(r.settings.showBulkDeleteMembershipsToAdmin === true);
         setShowBulkSettleSettlementsToAdmin(r.settings.showBulkSettleSettlementsToAdmin === true);
+        setShowMarkSettledToVendor(r.settings.showMarkSettledToVendor === true);
         setShowPackageActionsToVendor(r.settings.showPackageActionsToVendor === true);
         setShowEditDeleteActionsToVendor(r.settings.showEditDeleteActionsToVendor === true);
         setShowServiceActionsToVendor(r.settings.showServiceActionsToVendor === true);
@@ -287,6 +289,7 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
     showBulkDeletePackagesToAdmin,
     showBulkDeleteMembershipsToAdmin,
     showBulkSettleSettlementsToAdmin,
+    showMarkSettledToVendor,
     showPackageActionsToVendor,
     showEditDeleteActionsToVendor,
     showServiceActionsToVendor,
@@ -317,6 +320,7 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
     setMessage('');
     setMessageType(null);
     const r = await updateSettings({
+      showMarkSettledToVendor,
       showPackageActionsToVendor,
       showEditDeleteActionsToVendor,
       showServiceActionsToVendor,
@@ -839,7 +843,11 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
               <form onSubmit={handleSaveStaffVendorPermissions} className="settings-form">
                 <div className="settings-checkbox-group">
                   <span className="settings-checkbox-legend">Packages page (vendor/staff)</span>
-                  <label className="settings-checkbox-label"><input type="checkbox" checked={showPackageActionsToVendor} onChange={(e) => setShowPackageActionsToVendor(e.target.checked)} /><span>Packages – allow Edit, Activate, Inactive, and Delete (API must allow vendor when enabled)</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showPackageActionsToVendor} onChange={(e) => setShowPackageActionsToVendor(e.target.checked)} /><span>Packages – allow Edit, Activate, Inactive, and Delete for vendors</span></label>
+                </div>
+                <div className="settings-checkbox-group">
+                  <span className="settings-checkbox-legend">Settlements page (vendor)</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showMarkSettledToVendor} onChange={(e) => setShowMarkSettledToVendor(e.target.checked)} /><span>Settlements – allow Mark settled and bulk mark (only for entries involving the vendor&apos;s branch)</span></label>
                 </div>
                 <div className="settings-checkbox-group">
                   <span className="settings-checkbox-legend">Services page (vendor/staff)</span>
@@ -880,8 +888,9 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
                 </div>
 
                 <div className="settings-checkbox-group">
-                  <span className="settings-checkbox-legend">Vendor/staff – Packages &amp; Services pages</span>
+                  <span className="settings-checkbox-legend">Vendor/staff – Packages, settlements &amp; Services</span>
                   <label className="settings-checkbox-label"><input type="checkbox" checked={showPackageActionsToVendor} onChange={(e) => setShowPackageActionsToVendor(e.target.checked)} /><span>Packages – allow Edit, Activate, Inactive, and Delete</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showMarkSettledToVendor} onChange={(e) => setShowMarkSettledToVendor(e.target.checked)} /><span>Settlements – allow Mark settled for vendors (their branch only)</span></label>
                   <label className="settings-checkbox-label"><input type="checkbox" checked={showServiceActionsToVendor} onChange={(e) => setShowServiceActionsToVendor(e.target.checked)} /><span>Services – allow Add, Edit, and Delete</span></label>
                 </div>
 

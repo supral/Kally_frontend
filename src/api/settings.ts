@@ -41,6 +41,8 @@ export interface SystemSettings {
   showBulkDeleteMembershipsToAdmin?: boolean;
   /** When true, Admin sees bulk settle controls on Settlements page. */
   showBulkSettleSettlementsToAdmin?: boolean;
+  /** When true, Vendor can mark settlements settled (involving their branch). */
+  showMarkSettledToVendor?: boolean;
   /** When true, Vendor/Staff see Edit, Activate, Inactive, Delete on Packages page. */
   showPackageActionsToVendor?: boolean;
   /** When true, Vendor/Staff can see and use edit/delete actions across dashboard pages. */
@@ -95,6 +97,7 @@ export async function updateSettings(data: {
   showBulkDeletePackagesToAdmin?: boolean;
   showBulkDeleteMembershipsToAdmin?: boolean;
   showBulkSettleSettlementsToAdmin?: boolean;
+  showMarkSettledToVendor?: boolean;
   showPackageActionsToVendor?: boolean;
   showEditDeleteActionsToVendor?: boolean;
   showServiceActionsToVendor?: boolean;
