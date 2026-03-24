@@ -1,5 +1,6 @@
 import { apiRequest } from './client';
-import type { SalesDashboard, Settlement, OwnerOverviewBranch } from '../types/crm';
+import type { SalesDashboard, OwnerOverviewBranch } from '../types/crm';
+import type { Settlement } from '../types/common';
 
 export async function getSalesDashboard(params?: {
   branchId?: string;

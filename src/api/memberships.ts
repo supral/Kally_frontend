@@ -115,6 +115,15 @@ export async function recordMembershipUsage(membershipId: string, data: { credit
   return apiRequest<{ usage: MembershipUsage }>(`/memberships/${membershipId}/use`, { method: 'POST', body: JSON.stringify(data) });
 }
 
+export async function deleteMembershipUsage(
+  membershipId: string,
+  usageId: string
+): Promise<{ success: boolean; message?: string }> {
+  const r = await apiRequest<{ message?: string }>(`/memberships/${membershipId}/usage/${usageId}`, { method: 'DELETE' });
+  if (r.success) return { success: true };
+  return { success: false, message: (r as { message?: string }).message };
+}
+
 export async function updateMembership(id: string, data: { usedCredits?: number; status?: string; expiryDate?: string }) {
   return apiRequest<{ membership: Membership }>(`/memberships/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 }

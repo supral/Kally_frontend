@@ -5,11 +5,14 @@ import { getBranches } from '../api/branches';
 import { getPackages } from '../api/packages';
 import { getSettings } from '../api/settings';
 import { useAuth } from '../auth/hooks/useAuth';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { formatCurrency } from '../utils/money';
 import type { Membership, Branch } from '../types/crm';
 import type { Customer } from '../types/common';
 import type { PackageItem } from '../api/packages';
+import { matchCustomersBySearch, newCustomerMembershipSearchParams, digitsOnly } from '../features/memberships/utils/matchCustomersBySearch';
+
+const MEMBERSHIPS_LIST_SEARCH_KEY = 'kelly:memberships:listSearch';
 
 export default function MembershipsList() {
   const { user } = useAuth();
@@ -19,13 +22,23 @@ export default function MembershipsList() {
   const [membershipsTotal, setMembershipsTotal] = useState(0);
   const [membershipsTotalPages, setMembershipsTotalPages] = useState(1);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customersReady, setCustomersReady] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [packages, setPackages] = useState<PackageItem[]>([]);
   const [branchId, setBranchId] = useState(searchParams.get('branchId') || '');
   const [status, setStatus] = useState(searchParams.get('status') || '');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
+  const basePath = user?.role === 'admin' ? '/admin' : '/vendor';
+  const [searchQuery, setSearchQuery] = useState(() => {
+    try {
+      const stored = sessionStorage.getItem(MEMBERSHIPS_LIST_SEARCH_KEY);
+      if (stored != null) return stored;
+    } catch {
+      /* ignore */
+    }
+    return '';
+  });
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -46,6 +59,7 @@ export default function MembershipsList() {
   const [sessionsImportResult, setSessionsImportResult] = useState<{ ok: number; fail: number; skipped: number; missingMembershipIds?: Set<string>; missingBranchIds?: Set<string> } | null>(null);
   const [showImportButton, setShowImportButton] = useState(true);
   const [showBulkDeleteMembershipsToAdmin, setShowBulkDeleteMembershipsToAdmin] = useState(false);
+  const [showMembershipsExportToAdmin, setShowMembershipsExportToAdmin] = useState(true);
   const [showEditDeleteActionsToVendor, setShowEditDeleteActionsToVendor] = useState(false);
   const [selectedMembershipIds, setSelectedMembershipIds] = useState<Set<string>>(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -56,7 +70,6 @@ export default function MembershipsList() {
   const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
   const [deleteConfirmError, setDeleteConfirmError] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const basePath = user?.role === 'admin' ? '/admin' : '/vendor';
   const isAdmin = user?.role === 'admin';
   const PAGE_SIZE = 100;
 
@@ -121,11 +134,73 @@ export default function MembershipsList() {
       if (r.success && r.settings && typeof (r.settings as { showEditDeleteActionsToVendor?: boolean }).showEditDeleteActionsToVendor === 'boolean') {
         setShowEditDeleteActionsToVendor((r.settings as { showEditDeleteActionsToVendor: boolean }).showEditDeleteActionsToVendor);
       }
+      if (r.success && r.settings) {
+        const rs = r.settings as { showMembershipsExportToAdmin?: boolean };
+        setShowMembershipsExportToAdmin(rs.showMembershipsExportToAdmin !== false);
+      }
     });
   }, []);
 
   const canBulkDelete = isAdmin && showBulkDeleteMembershipsToAdmin;
   const canEditDeleteMembership = isAdmin || (!!user && user.role === 'vendor' && showEditDeleteActionsToVendor);
+
+  const searchTrimmed = searchQuery.trim();
+  const matchingCustomers = useMemo(() => {
+    if (!customersReady || !searchTrimmed) return [];
+    return matchCustomersBySearch(searchTrimmed, customers);
+  }, [customersReady, searchTrimmed, customers]);
+
+  const getMembershipsListReturnTo = useCallback(() => {
+    const p = new URLSearchParams();
+    const bid = branchId || searchParams.get('branchId');
+    const st = status || searchParams.get('status');
+    const cid = searchParams.get('customerId');
+    if (bid) p.set('branchId', bid);
+    if (st) p.set('status', st);
+    if (cid) p.set('customerId', cid);
+    const qs = p.toString();
+    return qs ? `${basePath}/memberships?${qs}` : `${basePath}/memberships`;
+  }, [basePath, branchId, status, searchParams]);
+
+  const goToMembershipDetail = useCallback(
+    (membershipId: string) => {
+      navigate(`${basePath}/memberships/${membershipId}`, {
+        state: { returnTo: getMembershipsListReturnTo() },
+      });
+    },
+    [navigate, basePath, getMembershipsListReturnTo]
+  );
+
+  const applySearchToCreateForm = useCallback(() => {
+    const t = searchQuery.trim();
+    if (digitsOnly(t).length >= 3) {
+      setCreateCustomerSearch(t);
+      setCreateCustomerDropdownOpen(true);
+    }
+    if (matchingCustomers.length === 1) {
+      setCreateCustomerId(matchingCustomers[0].id);
+      setCreateCustomerSearch('');
+      setCreateCustomerDropdownOpen(false);
+    }
+  }, [searchQuery, matchingCustomers]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(MEMBERSHIPS_LIST_SEARCH_KEY, searchQuery);
+    } catch {
+      /* ignore */
+    }
+  }, [searchQuery]);
+
+  const openCreateMembershipForCustomer = useCallback((customerId: string) => {
+    setShowCreateForm(true);
+    setCreateCustomerId(customerId);
+    setCreateCustomerSearch('');
+    setCreateCustomerDropdownOpen(false);
+    queueMicrotask(() => {
+      document.querySelector('.memberships-create-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, []);
 
   const toggleSelected = useCallback((id: string) => {
     setSelectedMembershipIds((prev) => {
@@ -916,7 +991,10 @@ export default function MembershipsList() {
   }, []);
 
   useEffect(() => {
-    getCustomers().then((r) => r.success && r.customers && setCustomers(r.customers || []));
+    getCustomers().then((r) => {
+      if (r.success && r.customers) setCustomers(r.customers || []);
+      setCustomersReady(true);
+    });
     getPackages(false).then((r) => r.success && r.packages && setPackages(r.packages || []));
   }, []);
 
@@ -1014,9 +1092,36 @@ export default function MembershipsList() {
           <h1 className="page-hero-title">Memberships</h1>
           <p className="page-hero-subtitle">Assign memberships to customers. View and use credits below.</p>
         </div>
-        <button type="button" className="auth-submit memberships-create-btn" onClick={() => setShowCreateForm(!showCreateForm)}>
-          {showCreateForm ? 'Cancel' : 'Create new membership'}
-        </button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="auth-submit memberships-create-btn"
+            onClick={() => {
+              setShowCreateForm((prev) => {
+                const next = !prev;
+                if (next) queueMicrotask(() => applySearchToCreateForm());
+                return next;
+              });
+            }}
+          >
+            {showCreateForm ? 'Cancel' : 'Create new membership'}
+          </button>
+          {searchTrimmed && (
+            <button
+              type="button"
+              className="filter-btn"
+              onClick={() => {
+                setShowCreateForm(true);
+                applySearchToCreateForm();
+                queueMicrotask(() => {
+                  document.querySelector('.memberships-create-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+              }}
+            >
+              Add another membership for this search
+            </button>
+          )}
+        </div>
       </header>
 
       {showCreateForm && (
@@ -1165,15 +1270,17 @@ export default function MembershipsList() {
               {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, totalFiltered)} of {totalFiltered}
             </span>
           )}
-          <button
-            type="button"
-            className="memberships-export-btn"
-            onClick={exportToCsv}
-            disabled={totalFiltered === 0}
-            title={totalFiltered === 0 ? 'No data to export' : 'Export filtered results to CSV/Excel'}
-          >
-            Export to CSV / Excel
-          </button>
+          {isAdmin && showMembershipsExportToAdmin && (
+            <button
+              type="button"
+              className="memberships-export-btn"
+              onClick={exportToCsv}
+              disabled={totalFiltered === 0}
+              title={totalFiltered === 0 ? 'No data to export' : 'Export filtered results to CSV/Excel'}
+            >
+              Export to CSV / Excel
+            </button>
+          )}
           {canBulkDelete && (
             <>
               <button type="button" className="filter-btn" onClick={selectAllFiltered} disabled={filteredMemberships.length === 0}>
@@ -1305,7 +1412,57 @@ export default function MembershipsList() {
         {loading ? (
           <div className="vendors-loading"><div className="spinner" /><span>Loading...</span></div>
         ) : memberships.length === 0 ? (
-          <p className="vendors-empty">No memberships found.</p>
+          <div className="vendors-empty memberships-empty-state">
+            <p>No memberships found for the current filters.</p>
+            {searchTrimmed && customersReady && (
+              <>
+                {matchingCustomers.length > 0 ? (
+                  <div style={{ marginTop: '1rem', textAlign: 'left', maxWidth: 640 }}>
+                    <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
+                      {matchingCustomers.length === 1
+                        ? 'This customer is in your database but has no memberships that match this list (check status or date filters, or add a new membership).'
+                        : `${matchingCustomers.length} customers match your search but have no memberships that match this list.`}
+                    </p>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      {matchingCustomers.slice(0, 12).map((c) => (
+                        <li key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                          <span>
+                            <strong>{c.name}</strong>
+                            {c.phone ? ` — ${c.phone}` : ''}
+                          </span>
+                          <button
+                            type="button"
+                            className="settings-btn settings-btn-primary settings-btn-sm"
+                            onClick={() => openCreateMembershipForCustomer(c.id)}
+                          >
+                            Add membership
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    {matchingCustomers.length > 12 && (
+                      <p className="text-muted" style={{ marginTop: '0.5rem' }}>
+                        …and {matchingCustomers.length - 12} more — narrow your search to see them all.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ marginTop: '1rem' }}>
+                    <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
+                      No customer matches that name or phone. Create a new customer and sell a membership in one step.
+                    </p>
+                    <Link
+                      to={`${basePath}/memberships/new-customer?${newCustomerMembershipSearchParams(searchTrimmed)}`}
+                      className="settings-btn settings-btn-primary"
+                      style={{ display: 'inline-block', textDecoration: 'none' }}
+                    >
+                      Add member / customer
+                    </Link>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         ) : (
           <>
             {/* Mobile: card list */}
@@ -1318,8 +1475,8 @@ export default function MembershipsList() {
                     className="membership-mobile-card"
                     role="button"
                     tabIndex={0}
-                    onClick={() => navigate(`${basePath}/memberships/${m.id}`)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`${basePath}/memberships/${m.id}`); } }}
+                    onClick={() => goToMembershipDetail(m.id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goToMembershipDetail(m.id); } }}
                   >
                     {canBulkDelete && (
                       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.5rem' }} onClick={(e) => e.stopPropagation()}>
@@ -1363,7 +1520,7 @@ export default function MembershipsList() {
                         <button
                           type="button"
                           className="filter-btn"
-                          onClick={() => navigate(`${basePath}/memberships/${m.id}`)}
+                          onClick={() => goToMembershipDetail(m.id)}
                           title="View / Edit"
                         >
                           Edit
@@ -1406,8 +1563,8 @@ export default function MembershipsList() {
                     className="memberships-row-clickable"
                     role="button"
                     tabIndex={0}
-                    onClick={() => navigate(`${basePath}/memberships/${m.id}`)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`${basePath}/memberships/${m.id}`); } }}
+                    onClick={() => goToMembershipDetail(m.id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goToMembershipDetail(m.id); } }}
                   >
                     {canBulkDelete && (
                       <td onClick={(e) => e.stopPropagation()}>
@@ -1430,7 +1587,7 @@ export default function MembershipsList() {
                         <button
                           type="button"
                           className="filter-btn"
-                          onClick={() => navigate(`${basePath}/memberships/${m.id}`)}
+                          onClick={() => goToMembershipDetail(m.id)}
                           title="View / Edit"
                         >
                           Edit

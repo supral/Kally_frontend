@@ -27,6 +27,7 @@ const AdminBranchesPage = lazy(() => import('../pages/admin/BranchesPage').then(
 const AdminSalesPage = lazy(() => import('../pages/admin/SalesPage').then((m) => ({ default: m.default })));
 const AdminSalesImagesPage = lazy(() => import('../pages/admin/SalesImagesPage').then((m) => ({ default: m.default })));
 const AdminMembershipsPage = lazy(() => import('../pages/admin/MembershipsPage').then((m) => ({ default: m.default })));
+const AdminNewCustomerMembershipPage = lazy(() => import('../pages/admin/NewCustomerMembershipPage').then((m) => ({ default: m.default })));
 const AdminMembershipDetailPage = lazy(() => import('../pages/admin/MembershipDetailPage').then((m) => ({ default: m.default })));
 const AdminCustomersPage = lazy(() => import('../pages/admin/CustomersPage').then((m) => ({ default: m.default })));
 const CustomerDetailPage = lazy(() => import('../features/customers/pages/CustomerDetailPage').then((m) => ({ default: m.default })));
@@ -55,6 +56,7 @@ const VendorBranchesPage = lazy(() => import('../pages/vendor/BranchesPage').the
 const VendorSalesPage = lazy(() => import('../pages/vendor/SalesPage').then((m) => ({ default: m.default })));
 const VendorSalesImagesPage = lazy(() => import('../pages/vendor/SalesImagesPage').then((m) => ({ default: m.default })));
 const VendorMembershipsPage = lazy(() => import('../pages/vendor/MembershipsPage').then((m) => ({ default: m.default })));
+const VendorNewCustomerMembershipPage = lazy(() => import('../pages/vendor/NewCustomerMembershipPage').then((m) => ({ default: m.default })));
 const VendorPackagesPage = lazy(() => import('../pages/vendor/PackagesPage').then((m) => ({ default: m.default })));
 const VendorMembershipDetailPage = lazy(() => import('../pages/vendor/MembershipDetailPage').then((m) => ({ default: m.default })));
 const VendorCustomersPage = lazy(() => import('../pages/vendor/CustomersPage').then((m) => ({ default: m.default })));
@@ -100,6 +102,7 @@ export function AppRoutes() {
           <Route path="branches" element={<AdminBranchesPage />} />
           <Route path="sales" element={<AdminSalesPage />} />
           <Route path="sales-images" element={<AdminSalesImagesPage />} />
+          <Route path="memberships/new-customer" element={<AdminNewCustomerMembershipPage />} />
           <Route path="memberships" element={<AdminMembershipsPage />} />
           <Route path="memberships/:id" element={<AdminMembershipDetailPage />} />
           <Route path="customers" element={<AdminCustomersPage />} />
@@ -138,6 +141,7 @@ export function AppRoutes() {
             <Route path="branches" element={<VendorBranchesPage />} />
             <Route path="sales" element={<VendorSalesPage />} />
             <Route path="sales-images" element={<VendorSalesImagesPage />} />
+            <Route path="memberships/new-customer" element={<VendorNewCustomerMembershipPage />} />
             <Route path="memberships" element={<VendorMembershipsPage />} />
             <Route path="memberships/:id" element={<VendorMembershipDetailPage />} />
             <Route path="customers" element={<VendorCustomersPage />} />

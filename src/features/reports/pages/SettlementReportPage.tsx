@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { getSettlements, updateSettlement, bulkSettleSettlements, type SettlementSummaryRow } from '../../../api/reports';
 import { createCustomer, getCustomersForDropdown } from '../../../api/customers';
@@ -39,11 +39,23 @@ export default function SettlementReportPage() {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(1);
-  const [settings, setSettings] = useState<{ showBulkSettleSettlementsToAdmin?: boolean } | null>(null);
+  const [settings, setSettings] = useState<{
+    showBulkSettleSettlementsToAdmin?: boolean;
+    showSettlementsExportToAdmin?: boolean;
+  } | null>(null);
   const [selectedSettlementIds, setSelectedSettlementIds] = useState<Set<string>>(() => new Set());
   const [bulkSettling, setBulkSettling] = useState(false);
+  const [branchFromId, setBranchFromId] = useState('');
+  const [branchToId, setBranchToId] = useState('');
 
   const isAdmin = user?.role === 'admin';
+  const canExportSettlements = isAdmin && (settings?.showSettlementsExportToAdmin !== false);
+
+  const branchNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    branches.forEach((b) => m.set(b.id, b.name));
+    return m;
+  }, [branches]);
 
   const nameSearch = addName.trim().toLowerCase();
   const filteredCustomers = nameSearch
@@ -103,10 +115,17 @@ export default function SettlementReportPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const filteredSettlements =
-    statusFilter === 'all'
-      ? settlements
-      : settlements.filter((s) => (s.status || '').toLowerCase() === statusFilter);
+  const filteredSettlements = useMemo(() => {
+    let rows =
+      statusFilter === 'all'
+        ? settlements
+        : settlements.filter((s) => (s.status || '').toLowerCase() === statusFilter);
+    const fromName = branchFromId ? branchNameById.get(branchFromId) : null;
+    const toName = branchToId ? branchNameById.get(branchToId) : null;
+    if (fromName) rows = rows.filter((s) => s.fromBranch === fromName);
+    if (toName) rows = rows.filter((s) => s.toBranch === toName);
+    return rows;
+  }, [settlements, statusFilter, branchFromId, branchToId, branchNameById]);
 
   const PAGE_SIZE = 10;
   const totalFiltered = filteredSettlements.length;
@@ -117,7 +136,40 @@ export default function SettlementReportPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [statusFilter]);
+  }, [statusFilter, branchFromId, branchToId]);
+
+  function exportSettlementsCsv() {
+    const esc = (v: unknown) => {
+      const s = String(v ?? '');
+      if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    const headers = ['Customer name', 'Customer phone', 'Package', 'From branch', 'To branch', 'Amount', 'Reason', 'Status', 'Date'];
+    const lines = [headers.join(',')];
+    for (const s of filteredSettlements) {
+      const dateStr = s.createdAt ? new Date(s.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '';
+      lines.push(
+        [
+          esc(s.customerName),
+          esc(s.customerPhone),
+          esc(s.packageName),
+          esc(s.fromBranch),
+          esc(s.toBranch),
+          esc(typeof s.amount === 'number' ? s.amount : s.amount),
+          esc(s.reason),
+          esc(s.status),
+          esc(dateStr),
+        ].join(',')
+      );
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `settlements-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   const pendingTotal = settlements
     .filter((s) => (s.status || '').toLowerCase() === 'pending')
@@ -407,7 +459,7 @@ export default function SettlementReportPage() {
           <section className="content-card settlements-table-card">
             <div className="settlements-table-header">
               <h2 className="settlements-section-title">Settlement entries</h2>
-              <div className="settlements-filters">
+              <div className="settlements-filters" style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
                 <span className="settlements-filter-label">Status:</span>
                 {(['all', 'pending', 'settled'] as const).map((f) => (
                   <button
@@ -419,6 +471,49 @@ export default function SettlementReportPage() {
                     {f === 'all' ? 'All' : f === 'pending' ? 'Pending' : 'Settled'}
                   </button>
                 ))}
+                <label className="settlements-filter-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', marginLeft: '0.5rem' }}>
+                  <span>Branch from</span>
+                  <select
+                    value={branchFromId}
+                    onChange={(e) => setBranchFromId(e.target.value)}
+                    className="memberships-filter-select"
+                    aria-label="Filter by from branch"
+                  >
+                    <option value="">All</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="settlements-filter-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <span>Branch to</span>
+                  <select
+                    value={branchToId}
+                    onChange={(e) => setBranchToId(e.target.value)}
+                    className="memberships-filter-select"
+                    aria-label="Filter by to branch"
+                  >
+                    <option value="">All</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {canExportSettlements && (
+                  <button
+                    type="button"
+                    className="customers-export-btn"
+                    onClick={exportSettlementsCsv}
+                    disabled={filteredSettlements.length === 0}
+                    title={filteredSettlements.length === 0 ? 'No rows to export' : 'Export filtered settlements to CSV'}
+                  >
+                    Export CSV
+                  </button>
+                )}
               </div>
             </div>
 

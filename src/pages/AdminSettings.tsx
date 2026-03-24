@@ -43,6 +43,16 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
   const [showPackageActionsToVendor, setShowPackageActionsToVendor] = useState<boolean>(false);
   const [showEditDeleteActionsToVendor, setShowEditDeleteActionsToVendor] = useState<boolean>(false);
   const [showServiceActionsToVendor, setShowServiceActionsToVendor] = useState<boolean>(false);
+  const [showCustomerDeleteToAdmin, setShowCustomerDeleteToAdmin] = useState<boolean>(true);
+  const [showCustomerDeleteToVendor, setShowCustomerDeleteToVendor] = useState<boolean>(false);
+  const [showCustomerDeleteToStaff, setShowCustomerDeleteToStaff] = useState<boolean>(false);
+  const [showMembershipsExportToAdmin, setShowMembershipsExportToAdmin] = useState<boolean>(true);
+  const [showCustomersExportToAdmin, setShowCustomersExportToAdmin] = useState<boolean>(true);
+  const [showSettlementsExportToAdmin, setShowSettlementsExportToAdmin] = useState<boolean>(true);
+  const [showDeleteMembershipUsageToAdmin, setShowDeleteMembershipUsageToAdmin] = useState<boolean>(true);
+  const [showManualSalesDeleteToAdmin, setShowManualSalesDeleteToAdmin] = useState<boolean>(true);
+  const [staffVendorPermsSaving, setStaffVendorPermsSaving] = useState(false);
+  const [adminPermsSaving, setAdminPermsSaving] = useState(false);
   const [passwordCurrent, setPasswordCurrent] = useState('');
   const [passwordNew, setPasswordNew] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
@@ -94,6 +104,21 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
         setShowPackageActionsToVendor(r.settings.showPackageActionsToVendor === true);
         setShowEditDeleteActionsToVendor(r.settings.showEditDeleteActionsToVendor === true);
         setShowServiceActionsToVendor(r.settings.showServiceActionsToVendor === true);
+        setShowCustomerDeleteToAdmin((r.settings as { showCustomerDeleteToAdmin?: boolean }).showCustomerDeleteToAdmin !== false);
+        setShowCustomerDeleteToVendor((r.settings as { showCustomerDeleteToVendor?: boolean }).showCustomerDeleteToVendor === true);
+        setShowCustomerDeleteToStaff((r.settings as { showCustomerDeleteToStaff?: boolean }).showCustomerDeleteToStaff === true);
+        const rs = r.settings as {
+          showMembershipsExportToAdmin?: boolean;
+          showCustomersExportToAdmin?: boolean;
+          showSettlementsExportToAdmin?: boolean;
+          showDeleteMembershipUsageToAdmin?: boolean;
+          showManualSalesDeleteToAdmin?: boolean;
+        };
+        setShowMembershipsExportToAdmin(rs.showMembershipsExportToAdmin !== false);
+        setShowCustomersExportToAdmin(rs.showCustomersExportToAdmin !== false);
+        setShowSettlementsExportToAdmin(rs.showSettlementsExportToAdmin !== false);
+        setShowDeleteMembershipUsageToAdmin(rs.showDeleteMembershipUsageToAdmin !== false);
+        setShowManualSalesDeleteToAdmin(rs.showManualSalesDeleteToAdmin !== false);
       }
     });
   }, []);
@@ -257,9 +282,53 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
     }
   };
 
+  const permissionPayloadAll = () => ({
+    showBulkDeleteBranchesToAdmin,
+    showBulkDeletePackagesToAdmin,
+    showBulkDeleteMembershipsToAdmin,
+    showBulkSettleSettlementsToAdmin,
+    showPackageActionsToVendor,
+    showEditDeleteActionsToVendor,
+    showServiceActionsToVendor,
+    showCustomerDeleteToAdmin,
+    showCustomerDeleteToVendor,
+    showCustomerDeleteToStaff,
+    showMembershipsExportToAdmin,
+    showCustomersExportToAdmin,
+    showSettlementsExportToAdmin,
+    showDeleteMembershipUsageToAdmin,
+    showManualSalesDeleteToAdmin,
+  });
+
   const handleSaveBulkDeleteToggles = async (e: React.FormEvent) => {
     e.preventDefault();
     setBulkDeleteTogglesSaving(true);
+    setMessage('');
+    setMessageType(null);
+    const r = await updateSettings(permissionPayloadAll());
+    setBulkDeleteTogglesSaving(false);
+    setMessageType(r.success ? 'success' : 'error');
+    setMessage(r.success ? 'Roles and action permissions saved.' : r.message || 'Failed to save.');
+  };
+
+  const handleSaveStaffVendorPermissions = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStaffVendorPermsSaving(true);
+    setMessage('');
+    setMessageType(null);
+    const r = await updateSettings({
+      showPackageActionsToVendor,
+      showEditDeleteActionsToVendor,
+      showServiceActionsToVendor,
+    });
+    setStaffVendorPermsSaving(false);
+    setMessageType(r.success ? 'success' : 'error');
+    setMessage(r.success ? 'Staff and vendor data actions saved.' : r.message || 'Failed to save.');
+  };
+
+  const handleSaveAdminAreaPermissions = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminPermsSaving(true);
     setMessage('');
     setMessageType(null);
     const r = await updateSettings({
@@ -267,13 +336,18 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
       showBulkDeletePackagesToAdmin,
       showBulkDeleteMembershipsToAdmin,
       showBulkSettleSettlementsToAdmin,
-      showPackageActionsToVendor,
-      showEditDeleteActionsToVendor,
-      showServiceActionsToVendor,
+      showCustomerDeleteToAdmin,
+      showCustomerDeleteToVendor,
+      showCustomerDeleteToStaff,
+      showMembershipsExportToAdmin,
+      showCustomersExportToAdmin,
+      showSettlementsExportToAdmin,
+      showDeleteMembershipUsageToAdmin,
+      showManualSalesDeleteToAdmin,
     });
-    setBulkDeleteTogglesSaving(false);
+    setAdminPermsSaving(false);
     setMessageType(r.success ? 'success' : 'error');
-    setMessage(r.success ? 'Bulk actions visibility saved.' : r.message || 'Failed to save.');
+    setMessage(r.success ? 'Administrator permissions saved.' : r.message || 'Failed to save.');
   };
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
@@ -521,9 +595,11 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
       {toastEl != null && createPortal(toastEl, document.body)}
       {dialogEl != null && createPortal(dialogEl, document.body)}
       <header className="page-hero settings-page-hero">
-        <h1 className="page-hero-title">Settings</h1>
+        <h1 className="page-hero-title">{mode === 'roles' ? 'Roles and permissions' : 'Settings'}</h1>
         <p className="page-hero-subtitle">
-          Manage system configuration, security, and vendor experience.
+          {mode === 'roles'
+            ? 'Control staff, vendor, and administrator capabilities for notifications, imports, bulk actions, exports, and sensitive operations.'
+            : 'Manage system configuration, security, and vendor experience.'}
         </p>
       </header>
 
@@ -620,11 +696,14 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
         )}
 
         {(mode === 'full' || mode === 'roles') && (
+        <>
         <section className="content-card settings-card">
-          <h2 className="settings-card-title">Vendor experience</h2>
+          <h2 className="settings-card-title">
+            {mode === 'roles' ? 'Staff and vendor' : 'Vendor experience, notifications, and permissions'}
+          </h2>
 
           <div className="settings-block settings-block-divider">
-            <h3 className="settings-block-heading">Guidelines in vendor dashboard</h3>
+            <h3 className="settings-block-heading">{mode === 'roles' ? 'Guidelines (vendor dashboard)' : 'Guidelines in vendor dashboard'}</h3>
             <p className="settings-block-desc">Show or hide the Guidelines link in the vendor sidebar.</p>
             {settingsLoading ? (
               <p className="text-muted">Loading...</p>
@@ -658,7 +737,7 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
           </div>
 
           <div className="settings-block settings-block-divider">
-            <h3 className="settings-block-heading">Vendor notifications</h3>
+            <h3 className="settings-block-heading">{mode === 'roles' ? 'Staff and vendor notifications' : 'Vendor notifications'}</h3>
             <p className="settings-block-desc">Notification bell visibility and which categories appear in the dropdown.</p>
             {settingsLoading ? (
               <p className="text-muted">Loading...</p>
@@ -700,6 +779,7 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
             )}
           </div>
 
+          {mode === 'full' && (
           <div className="settings-block settings-block-divider">
             <h3 className="settings-block-heading">Admin notifications</h3>
             <p className="settings-block-desc">Notification bell visibility and which categories appear in the dropdown for admins.</p>
@@ -742,31 +822,72 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
               </form>
             )}
           </div>
+          )}
 
           <div className="settings-block settings-block-divider">
-            <h3 className="settings-block-heading">Action access controls</h3>
-            <p className="settings-block-desc">Control who can see and use edit, delete, and bulk action buttons across the dashboard.</p>
+            <h3 className="settings-block-heading">
+              {mode === 'roles' ? 'Staff and vendor – data actions' : 'Action access controls'}
+            </h3>
+            <p className="settings-block-desc">
+              {mode === 'roles'
+                ? 'Packages, services, and cross-module edit/delete for vendor/staff accounts.'
+                : 'Control who can see and use edit, delete, bulk actions, customer deletes, exports, and other sensitive buttons.'}
+            </p>
             {settingsLoading ? (
               <p className="text-muted">Loading...</p>
+            ) : mode === 'roles' ? (
+              <form onSubmit={handleSaveStaffVendorPermissions} className="settings-form">
+                <div className="settings-checkbox-group">
+                  <span className="settings-checkbox-legend">Packages page (vendor/staff)</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showPackageActionsToVendor} onChange={(e) => setShowPackageActionsToVendor(e.target.checked)} /><span>Packages – allow Edit, Activate, Inactive, and Delete (API must allow vendor when enabled)</span></label>
+                </div>
+                <div className="settings-checkbox-group">
+                  <span className="settings-checkbox-legend">Services page (vendor/staff)</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showServiceActionsToVendor} onChange={(e) => setShowServiceActionsToVendor(e.target.checked)} /><span>Services – allow Add, Edit, and Delete</span></label>
+                </div>
+                <div className="settings-checkbox-group">
+                  <span className="settings-checkbox-legend">Other modules (memberships, customers, etc.)</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showEditDeleteActionsToVendor} onChange={(e) => setShowEditDeleteActionsToVendor(e.target.checked)} /><span>Allow Edit and Delete wherever supported for vendor/staff</span></label>
+                </div>
+                <button type="submit" className="settings-btn settings-btn-primary" disabled={staffVendorPermsSaving}>
+                  {staffVendorPermsSaving ? 'Saving…' : 'Save staff and vendor actions'}
+                </button>
+              </form>
             ) : (
               <form onSubmit={handleSaveBulkDeleteToggles} className="settings-form">
                 <div className="settings-checkbox-group">
-                  <span className="settings-checkbox-legend">Section 1: Admin-only bulk action buttons</span>
-                  <label className="settings-checkbox-label"><input type="checkbox" checked={showBulkDeleteBranchesToAdmin} onChange={(e) => setShowBulkDeleteBranchesToAdmin(e.target.checked)} /><span>Branches - show "Bulk Delete" button to admin</span></label>
-                  <label className="settings-checkbox-label"><input type="checkbox" checked={showBulkDeletePackagesToAdmin} onChange={(e) => setShowBulkDeletePackagesToAdmin(e.target.checked)} /><span>Packages - show "Bulk Delete" button to admin</span></label>
-                  <label className="settings-checkbox-label"><input type="checkbox" checked={showBulkDeleteMembershipsToAdmin} onChange={(e) => setShowBulkDeleteMembershipsToAdmin(e.target.checked)} /><span>Memberships - show "Bulk Delete" button to admin</span></label>
-                  <label className="settings-checkbox-label"><input type="checkbox" checked={showBulkSettleSettlementsToAdmin} onChange={(e) => setShowBulkSettleSettlementsToAdmin(e.target.checked)} /><span>Settlements - show "Bulk Mark Settled" button to admin</span></label>
+                  <span className="settings-checkbox-legend">Admin – bulk actions</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showBulkDeleteBranchesToAdmin} onChange={(e) => setShowBulkDeleteBranchesToAdmin(e.target.checked)} /><span>Branches – show Bulk Delete to admin</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showBulkDeletePackagesToAdmin} onChange={(e) => setShowBulkDeletePackagesToAdmin(e.target.checked)} /><span>Packages – show Bulk Delete to admin</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showBulkDeleteMembershipsToAdmin} onChange={(e) => setShowBulkDeleteMembershipsToAdmin(e.target.checked)} /><span>Memberships – show Bulk Delete to admin</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showBulkSettleSettlementsToAdmin} onChange={(e) => setShowBulkSettleSettlementsToAdmin(e.target.checked)} /><span>Settlements – show Bulk Mark Settled to admin</span></label>
                 </div>
 
                 <div className="settings-checkbox-group">
-                  <span className="settings-checkbox-legend">Section 2: Package action buttons for vendor/staff</span>
-                  <label className="settings-checkbox-label"><input type="checkbox" checked={showPackageActionsToVendor} onChange={(e) => setShowPackageActionsToVendor(e.target.checked)} /><span>Packages - allow vendor/staff to see Edit, Activate, Inactive, and Delete buttons</span></label>
-                  <label className="settings-checkbox-label"><input type="checkbox" checked={showServiceActionsToVendor} onChange={(e) => setShowServiceActionsToVendor(e.target.checked)} /><span>Services - allow vendor/staff to Add, Edit, and Delete services</span></label>
+                  <span className="settings-checkbox-legend">Admin – Customers page</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showCustomerDeleteToAdmin} onChange={(e) => setShowCustomerDeleteToAdmin(e.target.checked)} /><span>Customers – bulk delete for admin</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showCustomerDeleteToVendor} onChange={(e) => setShowCustomerDeleteToVendor(e.target.checked)} /><span>Customers – bulk delete for vendor/staff</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showCustomerDeleteToStaff} onChange={(e) => setShowCustomerDeleteToStaff(e.target.checked)} /><span>Customers – bulk delete (separate staff flag; use if you distinguish staff from vendor in API)</span></label>
                 </div>
 
                 <div className="settings-checkbox-group">
-                  <span className="settings-checkbox-legend">Section 3: Global Edit/Delete permission for vendor/staff</span>
-                  <label className="settings-checkbox-label"><input type="checkbox" checked={showEditDeleteActionsToVendor} onChange={(e) => setShowEditDeleteActionsToVendor(e.target.checked)} /><span>Allow vendor/staff to use Edit and Delete actions across all supported modules</span></label>
+                  <span className="settings-checkbox-legend">Admin – CSV exports and sensitive actions</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showMembershipsExportToAdmin} onChange={(e) => setShowMembershipsExportToAdmin(e.target.checked)} /><span>Memberships – Export to CSV / Excel</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showCustomersExportToAdmin} onChange={(e) => setShowCustomersExportToAdmin(e.target.checked)} /><span>Customers – Export to CSV / Excel</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showSettlementsExportToAdmin} onChange={(e) => setShowSettlementsExportToAdmin(e.target.checked)} /><span>Settlements – Export CSV</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showDeleteMembershipUsageToAdmin} onChange={(e) => setShowDeleteMembershipUsageToAdmin(e.target.checked)} /><span>Membership detail – delete recorded session / usage</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showManualSalesDeleteToAdmin} onChange={(e) => setShowManualSalesDeleteToAdmin(e.target.checked)} /><span>Sales dashboard – delete manual sale rows</span></label>
+                </div>
+
+                <div className="settings-checkbox-group">
+                  <span className="settings-checkbox-legend">Vendor/staff – Packages &amp; Services pages</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showPackageActionsToVendor} onChange={(e) => setShowPackageActionsToVendor(e.target.checked)} /><span>Packages – allow Edit, Activate, Inactive, and Delete</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showServiceActionsToVendor} onChange={(e) => setShowServiceActionsToVendor(e.target.checked)} /><span>Services – allow Add, Edit, and Delete</span></label>
+                </div>
+
+                <div className="settings-checkbox-group">
+                  <span className="settings-checkbox-legend">Vendor/staff – other modules</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showEditDeleteActionsToVendor} onChange={(e) => setShowEditDeleteActionsToVendor(e.target.checked)} /><span>Allow Edit and Delete across supported modules (memberships, customer packages, etc.)</span></label>
                 </div>
                 <button type="submit" className="settings-btn settings-btn-primary" disabled={bulkDeleteTogglesSaving}>
                   {bulkDeleteTogglesSaving ? 'Saving…' : 'Save roles & permissions'}
@@ -776,7 +897,7 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
           </div>
 
           <div className="settings-block">
-            <h3 className="settings-block-heading">Import buttons</h3>
+            <h3 className="settings-block-heading">{mode === 'roles' ? 'Import buttons (dashboard)' : 'Import buttons'}</h3>
             <p className="settings-block-desc">Show or hide Import buttons on Branches, Packages, Customers, Memberships, and Appointments.</p>
             {settingsLoading ? (
               <p className="text-muted">Loading...</p>
@@ -799,6 +920,8 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
             )}
           </div>
 
+          {mode === 'full' && (
+          <>
           <div className="settings-block settings-block-divider">
             <h3 className="settings-block-heading">Import legacy customers (JSON)</h3>
             <p className="settings-block-desc">
@@ -968,7 +1091,94 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
               </div>
             )}
           </div>
+          </>
+          )}
         </section>
+
+        {mode === 'roles' && (
+        <section className="content-card settings-card">
+          <h2 className="settings-card-title">Administrators</h2>
+
+          <div className="settings-block settings-block-divider">
+            <h3 className="settings-block-heading">Admin notifications</h3>
+            <p className="settings-block-desc">Notification bell visibility and which categories appear in the dropdown for admins.</p>
+            {settingsLoading ? (
+              <p className="text-muted">Loading...</p>
+            ) : (
+              <form onSubmit={handleSaveAdminNotificationSettings} className="settings-form">
+                <div className="settings-radio-group">
+                  <span className="settings-radio-legend">Show notification bell</span>
+                  <label className="settings-radio-label">
+                    <input
+                      type="radio"
+                      name="showNotificationBellToAdminsRoles"
+                      checked={showNotificationBellToAdmins === true}
+                      onChange={() => setShowNotificationBellToAdmins(true)}
+                    />
+                    <span>Yes</span>
+                  </label>
+                  <label className="settings-radio-label">
+                    <input
+                      type="radio"
+                      name="showNotificationBellToAdminsRoles"
+                      checked={showNotificationBellToAdmins === false}
+                      onChange={() => setShowNotificationBellToAdmins(false)}
+                    />
+                    <span>No</span>
+                  </label>
+                </div>
+                <div className="settings-checkbox-group">
+                  <span className="settings-checkbox-legend">Categories in dropdown</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showAdminNotificationAppointments} onChange={(e) => setShowAdminNotificationAppointments(e.target.checked)} /><span>Appointments</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showAdminNotificationSettlements} onChange={(e) => setShowAdminNotificationSettlements(e.target.checked)} /><span>Settlements</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showAdminNotificationTickets} onChange={(e) => setShowAdminNotificationTickets(e.target.checked)} /><span>Tickets</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showAdminNotificationComments} onChange={(e) => setShowAdminNotificationComments(e.target.checked)} /><span>Comments</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showAdminNotificationSalesData} onChange={(e) => setShowAdminNotificationSalesData(e.target.checked)} /><span>Sales Data</span></label>
+                </div>
+                <button type="submit" className="settings-btn settings-btn-primary" disabled={notificationsSaving}>
+                  {notificationsSaving ? 'Saving…' : 'Save admin notification settings'}
+                </button>
+              </form>
+            )}
+          </div>
+
+          <div className="settings-block settings-block-divider">
+            <h3 className="settings-block-heading">Admin – bulk, customer delete, exports, and sensitive actions</h3>
+            <p className="settings-block-desc">Controls bulk toolbar buttons on admin lists, customer bulk delete, CSV exports, and destructive actions on membership and sales screens.</p>
+            {settingsLoading ? (
+              <p className="text-muted">Loading...</p>
+            ) : (
+              <form onSubmit={handleSaveAdminAreaPermissions} className="settings-form">
+                <div className="settings-checkbox-group">
+                  <span className="settings-checkbox-legend">Admin – bulk actions</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showBulkDeleteBranchesToAdmin} onChange={(e) => setShowBulkDeleteBranchesToAdmin(e.target.checked)} /><span>Branches – show Bulk Delete to admin</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showBulkDeletePackagesToAdmin} onChange={(e) => setShowBulkDeletePackagesToAdmin(e.target.checked)} /><span>Packages – show Bulk Delete to admin</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showBulkDeleteMembershipsToAdmin} onChange={(e) => setShowBulkDeleteMembershipsToAdmin(e.target.checked)} /><span>Memberships – show Bulk Delete to admin</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showBulkSettleSettlementsToAdmin} onChange={(e) => setShowBulkSettleSettlementsToAdmin(e.target.checked)} /><span>Settlements – show Bulk Mark Settled to admin</span></label>
+                </div>
+                <div className="settings-checkbox-group">
+                  <span className="settings-checkbox-legend">Admin – Customers page</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showCustomerDeleteToAdmin} onChange={(e) => setShowCustomerDeleteToAdmin(e.target.checked)} /><span>Customers – bulk delete for admin</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showCustomerDeleteToVendor} onChange={(e) => setShowCustomerDeleteToVendor(e.target.checked)} /><span>Customers – bulk delete for vendor/staff</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showCustomerDeleteToStaff} onChange={(e) => setShowCustomerDeleteToStaff(e.target.checked)} /><span>Customers – bulk delete (staff flag; use if API distinguishes staff)</span></label>
+                </div>
+                <div className="settings-checkbox-group">
+                  <span className="settings-checkbox-legend">Admin – CSV exports and sensitive actions</span>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showMembershipsExportToAdmin} onChange={(e) => setShowMembershipsExportToAdmin(e.target.checked)} /><span>Memberships – Export to CSV / Excel</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showCustomersExportToAdmin} onChange={(e) => setShowCustomersExportToAdmin(e.target.checked)} /><span>Customers – Export to CSV / Excel</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showSettlementsExportToAdmin} onChange={(e) => setShowSettlementsExportToAdmin(e.target.checked)} /><span>Settlements – Export CSV</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showDeleteMembershipUsageToAdmin} onChange={(e) => setShowDeleteMembershipUsageToAdmin(e.target.checked)} /><span>Membership detail – delete recorded session / usage</span></label>
+                  <label className="settings-checkbox-label"><input type="checkbox" checked={showManualSalesDeleteToAdmin} onChange={(e) => setShowManualSalesDeleteToAdmin(e.target.checked)} /><span>Sales dashboard – delete manual sale rows</span></label>
+                </div>
+                <button type="submit" className="settings-btn settings-btn-primary" disabled={adminPermsSaving}>
+                  {adminPermsSaving ? 'Saving…' : 'Save administrator actions'}
+                </button>
+              </form>
+            )}
+          </div>
+        </section>
+        )}
+        </>
         )}
       </div>
     </div>

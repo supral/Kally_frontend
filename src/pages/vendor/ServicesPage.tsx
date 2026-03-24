@@ -227,14 +227,14 @@ export default function VendorServicesPage() {
                   <th>Branch</th>
                   <th>Duration</th>
                   <th>Price</th>
-                  {userBranchId && <th>Actions</th>}
+                  {userBranchId && showServiceActionsToVendor && <th>Actions</th>}
                 </tr>
               </thead>
               <tbody>
                 {services.map((s) => (
                   <tr key={s.id}>
                   {editingId === s.id && showServiceActionsToVendor && canEditService(s) ? (
-                      <td colSpan={userBranchId ? 6 : 5}>
+                      <td colSpan={userBranchId && showServiceActionsToVendor ? 6 : 5}>
                         <form onSubmit={handleUpdateService} className="settings-inline-form">
                           <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Name" required className="settings-input settings-input-sm" />
                           <input type="text" value={editCategory} onChange={(e) => setEditCategory(e.target.value)} placeholder="Category" className="settings-input settings-input-sm" />

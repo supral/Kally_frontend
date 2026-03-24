@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { getMembership, recordMembershipUsage, renewMembership } from '../../../api/memberships';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { getMembership, recordMembershipUsage, renewMembership, deleteMembershipUsage } from '../../../api/memberships';
 import { getBranches } from '../../../api/branches';
+import { getSettings } from '../../../api/settings';
 import { useAuth } from '../../../auth/hooks/useAuth';
 import { formatCurrency } from '../../../utils/money';
 import type { Membership, MembershipUsage } from '../../../types/common';
@@ -10,6 +11,7 @@ import type { Branch } from '../../../types/crm';
 export default function MembershipDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const [membership, setMembership] = useState<Membership | null>(null);
   const [usageHistory, setUsageHistory] = useState<MembershipUsage[]>([]);
@@ -23,7 +25,29 @@ export default function MembershipDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [renewing, setRenewing] = useState(false);
   const [renewCredits, setRenewCredits] = useState('');
+  const [usageDeleteId, setUsageDeleteId] = useState<string | null>(null);
+  const [usageDeleting, setUsageDeleting] = useState(false);
+  const [showDeleteMembershipUsageToAdmin, setShowDeleteMembershipUsageToAdmin] = useState(true);
   const basePath = user?.role === 'admin' ? '/admin' : '/vendor';
+  const isAdmin = user?.role === 'admin';
+  const canDeleteRecordedSession = isAdmin && showDeleteMembershipUsageToAdmin;
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    getSettings().then((r) => {
+      if (r.success && r.settings) {
+        const s = r.settings as { showDeleteMembershipUsageToAdmin?: boolean };
+        setShowDeleteMembershipUsageToAdmin(s.showDeleteMembershipUsageToAdmin !== false);
+      }
+    });
+  }, [isAdmin]);
+
+  const returnToMemberships =
+    (location.state as { returnTo?: string } | null)?.returnTo || `${basePath}/memberships`;
+
+  function goBackToMemberships() {
+    navigate(returnToMemberships);
+  }
 
   useEffect(() => {
     if (!id) return;
@@ -102,8 +126,25 @@ export default function MembershipDetailPage() {
     });
     setRenewing(false);
     if (res.success && res.membership) {
-      navigate(`${basePath}/memberships/${res.membership.id}`, { replace: true });
+      navigate(`${basePath}/memberships/${res.membership.id}`, { replace: true, state: location.state });
     } else setError((res as { message?: string }).message || 'Failed to renew membership');
+  }
+
+  async function confirmDeleteUsage() {
+    if (!id || !usageDeleteId) return;
+    setUsageDeleting(true);
+    setError('');
+    const res = await deleteMembershipUsage(id, usageDeleteId);
+    setUsageDeleting(false);
+    setUsageDeleteId(null);
+    if (res.success) {
+      getMembership(id).then((r) => {
+        if (r.success) {
+          setMembership(r.membership || null);
+          setUsageHistory(r.usageHistory || []);
+        }
+      });
+    } else setError((res as { message?: string }).message || 'Failed to delete session');
   }
 
   if (loading || !id) {
@@ -118,7 +159,7 @@ export default function MembershipDetailPage() {
     return (
       <div className="dashboard-content">
         <div className="auth-error">{error}</div>
-        <button type="button" className="auth-submit" style={{ marginTop: '1rem' }} onClick={() => navigate(`${basePath}/memberships`)}>Back to memberships</button>
+        <button type="button" className="auth-submit" style={{ marginTop: '1rem' }} onClick={goBackToMemberships}>Back to memberships</button>
       </div>
     );
   }
@@ -129,7 +170,7 @@ export default function MembershipDetailPage() {
 
   return (
     <div className="dashboard-content membership-detail-page">
-      <button type="button" className="membership-detail-back" onClick={() => navigate(`${basePath}/memberships`)}>← Back to memberships</button>
+      <button type="button" className="membership-detail-back" onClick={goBackToMemberships}>← Back to memberships</button>
 
       <section className="content-card membership-detail-card">
         <div className="membership-detail-header">
@@ -240,9 +281,23 @@ export default function MembershipDetailPage() {
             <div className="membership-usage-list">
               {usageHistory.map((u) => (
                 <div key={u.id} className="membership-usage-item">
-                  <div className="membership-usage-meta">
-                    <span className="membership-usage-branch">{u.usedAtBranch}</span>
-                    <span className="membership-usage-date">{new Date(u.usedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                  <div className="membership-usage-meta" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <span style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                      <span className="membership-usage-branch">{u.usedAtBranch}</span>
+                      <span className="membership-usage-date">{new Date(u.usedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                    </span>
+                    {canDeleteRecordedSession && (
+                      <button
+                        type="button"
+                        className="btn-reject"
+                        style={{ flexShrink: 0 }}
+                        aria-label="Delete this recorded session"
+                        title="Delete session (admin only)"
+                        onClick={() => setUsageDeleteId(u.id)}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                   <div className="membership-usage-body">
                     <span className="membership-usage-credits">{u.creditsUsed} credit{u.creditsUsed !== 1 ? 's' : ''} used</span>
@@ -255,6 +310,40 @@ export default function MembershipDetailPage() {
             </div>
           )}
         </section>
+
+        {usageDeleteId && canDeleteRecordedSession && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirm delete session"
+            onClick={() => !usageDeleting && setUsageDeleteId(null)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '1rem',
+              zIndex: 1000,
+            }}
+          >
+            <div className="content-card" onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 440 }}>
+              <h3 style={{ marginTop: 0 }}>Delete this recorded session?</h3>
+              <p className="text-muted">
+                This removes the usage entry, restores credits on the membership, and deletes any linked cross-branch settlement for that session. This cannot be undone.
+              </p>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                <button type="button" className="filter-btn" onClick={() => setUsageDeleteId(null)} disabled={usageDeleting}>
+                  Cancel
+                </button>
+                <button type="button" className="btn-reject" onClick={() => void confirmDeleteUsage()} disabled={usageDeleting}>
+                  {usageDeleting ? 'Deleting…' : 'Delete session'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );

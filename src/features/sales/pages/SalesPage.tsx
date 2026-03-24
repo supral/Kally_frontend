@@ -9,6 +9,7 @@ import {
   getManualSale,
   type ManualSale,
 } from '../../../api/manualSales';
+import { getSettings } from '../../../api/settings';
 import { useAuth } from '../../../auth/hooks/useAuth';
 import { formatCurrency, formatNumber } from '../../../utils/money';
 import type { SalesDashboard as SalesDashboardType } from '../../../types/common';
@@ -65,8 +66,10 @@ export default function SalesPage() {
   const [addError, setAddError] = useState('');
   const [viewImage, setViewImage] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showManualSalesDeleteToAdmin, setShowManualSalesDeleteToAdmin] = useState(true);
 
   const isAdmin = user?.role === 'admin';
+  const canDeleteManualSale = isAdmin && showManualSalesDeleteToAdmin;
   const selectedPackageName = packageId ? packages.find((p) => p.id === packageId)?.name : undefined;
 
   const fetchDashboardManualSales = useCallback(() => {
@@ -109,6 +112,12 @@ export default function SalesPage() {
           if (r.settlementSummary) setSettlementSummary(r.settlementSummary);
         }
       });
+      getSettings().then((r) => {
+        if (r.success && r.settings) {
+          const s = r.settings as { showManualSalesDeleteToAdmin?: boolean };
+          setShowManualSalesDeleteToAdmin(s.showManualSalesDeleteToAdmin !== false);
+        }
+      });
     } else setOverviewLoading(false);
   }, [isAdmin]);
 
@@ -119,8 +128,9 @@ export default function SalesPage() {
       from: dateFrom || undefined,
       to: dateTo || undefined,
       packageName: selectedPackageName,
+      // Admin overview needs full byBranch for KPIs; breakdownLimit: 1 truncated branch rows on the API.
       breakdownPage: isAdmin ? 1 : breakdownPage,
-      breakdownLimit: isAdmin ? 1 : breakdownLimit,
+      breakdownLimit,
     }).then((r) => {
       setLoading(false);
       if (r.success && r.data) setData(r.data);
@@ -176,7 +186,9 @@ export default function SalesPage() {
     branchPerfCurrentPage * BRANCH_PERF_PAGE_SIZE
   );
 
-  const totalMemberships = mergedByBranch.reduce((s, b) => s + (b.membershipCount ?? 0), 0);
+  const totalMembershipsFromRows = mergedByBranch.reduce((s, b) => s + (b.membershipCount ?? 0), 0);
+  const totalMemberships =
+    typeof data?.totalMemberships === 'number' ? data.totalMemberships : totalMembershipsFromRows;
   const totalAppointments = overview.reduce((s, b) => s + b.appointmentsThisMonth, 0);
 
   const membershipSales = typeof data?.totalSales === 'number'
@@ -257,7 +269,7 @@ export default function SalesPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!isAdmin) return;
+    if (!canDeleteManualSale) return;
     setDeletingId(id);
     const r = await deleteManualSale(id);
     setDeletingId(null);
@@ -700,7 +712,7 @@ export default function SalesPage() {
                               ) : (
                                 <span className="text-muted">—</span>
                               )}
-                              {isAdmin && (
+                              {canDeleteManualSale && (
                                 <button type="button" className="btn-danger btn-sm" onClick={() => handleDelete(s.id)} disabled={!!deletingId}>
                                   {deletingId === s.id ? '…' : 'Delete'}
                                 </button>
@@ -716,7 +728,7 @@ export default function SalesPage() {
                               <th>Date</th>
                               <th className="num">Amount</th>
                               <th>Receipt</th>
-                              {isAdmin && <th></th>}
+                              {canDeleteManualSale && <th></th>}
                             </tr>
                           </thead>
                           <tbody>
@@ -742,7 +754,7 @@ export default function SalesPage() {
                                     <span className="text-muted">—</span>
                                   )}
                                 </td>
-                                {isAdmin && (
+                                {canDeleteManualSale && (
                                   <td>
                                     <button type="button" className="btn-danger btn-sm" onClick={() => handleDelete(s.id)} disabled={!!deletingId}>
                                       {deletingId === s.id ? '…' : 'Delete'}

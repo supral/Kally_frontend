@@ -47,6 +47,16 @@ export interface SystemSettings {
   showEditDeleteActionsToVendor?: boolean;
   /** When true, Vendor/Staff can add, edit, and delete services. */
   showServiceActionsToVendor?: boolean;
+  /** When true, admin sees Memberships CSV export. */
+  showMembershipsExportToAdmin?: boolean;
+  /** When true, admin sees Customers CSV export. */
+  showCustomersExportToAdmin?: boolean;
+  /** When true, admin sees Settlements CSV export. */
+  showSettlementsExportToAdmin?: boolean;
+  /** When true, admin can delete a recorded membership usage/session on the detail page. */
+  showDeleteMembershipUsageToAdmin?: boolean;
+  /** When true, admin can delete manual sales rows on the sales dashboard. */
+  showManualSalesDeleteToAdmin?: boolean;
 }
 
 export async function getSettings(): Promise<{
@@ -88,6 +98,11 @@ export async function updateSettings(data: {
   showPackageActionsToVendor?: boolean;
   showEditDeleteActionsToVendor?: boolean;
   showServiceActionsToVendor?: boolean;
+  showMembershipsExportToAdmin?: boolean;
+  showCustomersExportToAdmin?: boolean;
+  showSettlementsExportToAdmin?: boolean;
+  showDeleteMembershipUsageToAdmin?: boolean;
+  showManualSalesDeleteToAdmin?: boolean;
 }): Promise<{
   success: boolean;
   settings?: SystemSettings;

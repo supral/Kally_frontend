@@ -33,6 +33,8 @@ export interface Membership {
   id: string;
   customer?: { id: string; name: string; phone: string; email?: string; membershipCardId?: string } | null;
   typeName?: string;
+  packageName?: string;
+  customerPackage?: string;
   totalCredits: number;
   usedCredits: number;
   remainingCredits?: number;
@@ -116,6 +118,10 @@ export interface Settlement {
   reason?: string;
   status: string;
   createdAt: string;
+  /** Populated by API for exports / reporting when available */
+  customerName?: string;
+  customerPhone?: string;
+  packageName?: string;
 }
 
 export interface OwnerOverviewBranch {

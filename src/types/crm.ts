@@ -34,6 +34,7 @@ export interface Membership {
   customer?: { id: string; name: string; phone: string; email?: string; membershipCardId?: string } | null;
   typeName?: string;
   packageName?: string;
+  customerPackage?: string;
   totalCredits: number;
   usedCredits: number;
   remainingCredits?: number;
@@ -120,15 +121,6 @@ export interface SalesDashboard {
   branches: { id: string; name: string }[];
 }
 
-export interface Settlement {
-  id: string;
-  fromBranch: string;
-  toBranch: string;
-  amount: number;
-  reason?: string;
-  status: string;
-  createdAt: string;
-}
 
 export interface OwnerOverviewBranch {
   branchId: string;

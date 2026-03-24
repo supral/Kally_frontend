@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useEffect, useState, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../auth/hooks/useAuth';
 import { getCustomer } from '../../../api/customers';
-import { getMemberships } from '../../../api/memberships';
+import { getMemberships, deleteMembership } from '../../../api/memberships';
+import { getSettings } from '../../../api/settings';
 import type { Customer } from '../../../types/common';
 import type { Membership } from '../../../types/common';
 
@@ -20,6 +21,10 @@ function getRemainingCredits(m: Membership): number {
   return Math.max(0, m.totalCredits - m.usedCredits);
 }
 
+function packageLabel(m: Membership): string {
+  return m.packageName || m.typeName || m.customerPackage || '—';
+}
+
 export default function CustomerMembershipsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -28,7 +33,27 @@ export default function CustomerMembershipsPage() {
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showEditDeleteActionsToVendor, setShowEditDeleteActionsToVendor] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const basePath = user?.role === 'admin' ? '/admin' : '/vendor';
+  const isAdmin = user?.role === 'admin';
+  const canEditDeleteMembership = isAdmin || (!!user && user.role === 'vendor' && showEditDeleteActionsToVendor);
+
+  const reloadMemberships = useCallback(() => {
+    if (!id) return;
+    getMemberships({ customerId: id }).then((r) => {
+      if (r.success && 'memberships' in r) setMemberships((r as { memberships: Membership[] }).memberships || []);
+      else setError((r as { message?: string }).message || 'Failed to load memberships.');
+    });
+  }, [id]);
+
+  useEffect(() => {
+    getSettings().then((r) => {
+      if (r.success && r.settings && typeof (r.settings as { showEditDeleteActionsToVendor?: boolean }).showEditDeleteActionsToVendor === 'boolean') {
+        setShowEditDeleteActionsToVendor((r.settings as { showEditDeleteActionsToVendor: boolean }).showEditDeleteActionsToVendor);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -44,6 +69,22 @@ export default function CustomerMembershipsPage() {
       }),
     ]).finally(() => setLoading(false));
   }, [id]);
+
+  const returnToThisPage = id ? `${basePath}/customers/${id}/memberships` : `${basePath}/customers`;
+
+  function goManageMembership(membershipId: string) {
+    navigate(`${basePath}/memberships/${membershipId}`, { state: { returnTo: returnToThisPage } });
+  }
+
+  async function handleDeleteMembership(membershipId: string) {
+    if (!window.confirm('Delete this membership? Related usage and settlement records may be removed. This cannot be undone.')) return;
+    setDeletingId(membershipId);
+    setError('');
+    const r = await deleteMembership(membershipId);
+    setDeletingId(null);
+    if (r.success) reloadMemberships();
+    else setError((r as { message?: string }).message || 'Failed to delete membership.');
+  }
 
   if (!id) {
     return (
@@ -72,8 +113,11 @@ export default function CustomerMembershipsPage() {
         {memberships.length === 0 && !error ? (
           <p className="text-muted">No memberships found for this customer.</p>
         ) : (
-          <div className="table-responsive" style={{ marginTop: '1rem' }}>
-            <table className="report-table">
+          <div
+            className="table-responsive customer-memberships-scroll"
+            style={{ marginTop: '1rem', overflowX: 'auto', WebkitOverflowScrolling: 'touch', maxWidth: '100%' }}
+          >
+            <table className="report-table" style={{ minWidth: '1040px', width: '100%' }}>
               <thead>
                 <tr>
                   <th>Package / Type</th>
@@ -84,13 +128,13 @@ export default function CustomerMembershipsPage() {
                   <th>Used</th>
                   <th>Remaining uses</th>
                   <th>Status</th>
-                  <th>Action</th>
+                  <th style={{ minWidth: '200px' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {memberships.map((m) => (
                   <tr key={m.id}>
-                    <td>{m.typeName || '—'}</td>
+                    <td>{packageLabel(m)}</td>
                     <td>{m.purchaseDate ? new Date(m.purchaseDate).toLocaleDateString() : '—'}</td>
                     <td>{m.expiryDate ? new Date(m.expiryDate).toLocaleDateString() : '—'}</td>
                     <td>{getExpiryRemaining(m.expiryDate)}</td>
@@ -99,7 +143,21 @@ export default function CustomerMembershipsPage() {
                     <td>{getRemainingCredits(m)}</td>
                     <td>{m.status || '—'}</td>
                     <td>
-                      <Link to={`${basePath}/memberships/${m.id}`} className="filter-btn">View</Link>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+                        <button type="button" className="filter-btn" onClick={() => goManageMembership(m.id)}>
+                          Manage / record session
+                        </button>
+                        {canEditDeleteMembership && (
+                          <button
+                            type="button"
+                            className="btn-reject"
+                            onClick={() => void handleDeleteMembership(m.id)}
+                            disabled={deletingId === m.id}
+                          >
+                            {deletingId === m.id ? '…' : 'Delete'}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

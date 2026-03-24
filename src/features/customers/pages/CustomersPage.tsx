@@ -30,6 +30,9 @@ export default function CustomersPage() {
   const importInputRef = useRef<HTMLInputElement>(null);
   const [showImportButton, setShowImportButton] = useState(true);
   const [showCustomerDeleteToAdmin, setShowCustomerDeleteToAdmin] = useState(true);
+  const [showCustomerDeleteToVendor, setShowCustomerDeleteToVendor] = useState(false);
+  const [showCustomerDeleteToStaff, setShowCustomerDeleteToStaff] = useState(false);
+  const [showCustomersExportToAdmin, setShowCustomersExportToAdmin] = useState(true);
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkDeleteMessage, setBulkDeleteMessage] = useState('');
@@ -100,13 +103,28 @@ export default function CustomersPage() {
       if (r.success && r.settings && typeof r.settings.showImportButton === 'boolean') {
         setShowImportButton(r.settings.showImportButton);
       }
-      if (r.success && r.settings && typeof (r.settings as { showCustomerDeleteToAdmin?: boolean }).showCustomerDeleteToAdmin === 'boolean') {
-        setShowCustomerDeleteToAdmin((r.settings as { showCustomerDeleteToAdmin: boolean }).showCustomerDeleteToAdmin);
+      if (r.success && r.settings) {
+        const s = r.settings as {
+          showCustomerDeleteToAdmin?: boolean;
+          showCustomerDeleteToVendor?: boolean;
+          showCustomerDeleteToStaff?: boolean;
+          showCustomersExportToAdmin?: boolean;
+        };
+        setShowCustomerDeleteToAdmin(s.showCustomerDeleteToAdmin !== false);
+        setShowCustomerDeleteToVendor(s.showCustomerDeleteToVendor === true);
+        setShowCustomerDeleteToStaff(s.showCustomerDeleteToStaff === true);
+        setShowCustomersExportToAdmin(s.showCustomersExportToAdmin !== false);
       }
     });
   }, []);
 
-  const canBulkDelete = isAdmin && showCustomerDeleteToAdmin;
+  const role = user?.role;
+  const roleStr = role as string | undefined;
+  const canBulkDelete =
+    (isAdmin && showCustomerDeleteToAdmin) ||
+    (!isAdmin && role === 'vendor' && showCustomerDeleteToVendor) ||
+    (!isAdmin && roleStr === 'staff' && showCustomerDeleteToStaff);
+  const canExportCustomers = isAdmin && showCustomersExportToAdmin;
 
   const toggleSelected = useCallback((id: string) => {
     setSelectedCustomerIds((prev) => {
@@ -444,15 +462,17 @@ export default function CustomersPage() {
                   Search
                 </button>
               </div>
-              <button
-                type="button"
-                className="customers-export-btn"
-                onClick={exportToCsv}
-                disabled={totalFiltered === 0}
-                title={totalFiltered === 0 ? 'No data to export' : 'Export filtered customers to CSV/Excel'}
-              >
-                Export to CSV / Excel
-              </button>
+              {canExportCustomers && (
+                <button
+                  type="button"
+                  className="customers-export-btn"
+                  onClick={exportToCsv}
+                  disabled={totalFiltered === 0}
+                  title={totalFiltered === 0 ? 'No data to export' : 'Export filtered customers to CSV/Excel'}
+                >
+                  Export to CSV / Excel
+                </button>
+              )}
               {showImportButton && (
                 <label className="customers-import-btn customers-import-btn-inline">
                   <input
