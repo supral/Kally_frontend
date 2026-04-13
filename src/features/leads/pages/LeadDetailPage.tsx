@@ -106,7 +106,9 @@ export default function LeadDetailPage() {
   async function handleBookAppointment(e: React.FormEvent) {
     e.preventDefault();
     if (!id || !lead || !bookCustomerId) return;
-    const branchIdToUse = isAdmin ? bookBranchId : (user?.branchId ?? '');
+    const branchIdToUse = isAdmin
+      ? String(bookBranchId || '')
+      : String(user?.branchId || lead.branchId || bookBranchId || '');
     if (!branchIdToUse) {
       setBookError('Branch is required.');
       return;
@@ -123,7 +125,12 @@ export default function LeadDetailPage() {
     });
     setBookSubmitting(false);
     if (res.success) {
-      await updateLead(id, { status: 'Booked' });
+      const bookedStatus = leadStatuses.find((s) => s.name.trim().toLowerCase() === 'booked')?.name || 'Booked';
+      const updateRes = await updateLead(id, { status: bookedStatus });
+      if (!updateRes.success) {
+        setBookError(updateRes.message || 'Appointment booked, but lead status could not be updated.');
+        return;
+      }
       getLead(id).then((r) => r.success && 'lead' in r && setLead((r as { lead: Lead }).lead));
       setBookModalOpen(false);
     } else setBookError((res as { message?: string }).message || 'Failed to book appointment.');

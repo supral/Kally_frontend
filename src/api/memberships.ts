@@ -137,7 +137,7 @@ export async function deleteMembership(id: string): Promise<{ success: boolean; 
 /** Renew an expired or fully used membership. Creates a new membership; packagePrice is included in total sales. */
 export async function renewMembership(
   id: string,
-  data: { packagePrice: number; totalCredits?: number; expiryDate?: string }
+  data: { packageId?: string; packagePrice?: number; totalCredits?: number; expiryDate?: string }
 ): Promise<{ success: boolean; membership?: Membership; message?: string }> {
   const r = await apiRequest<{ membership: Membership }>(`/memberships/${id}/renew`, {
     method: 'POST',

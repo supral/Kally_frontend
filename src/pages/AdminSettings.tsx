@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { getSettings, updateSettings } from '../api/settings';
 import { updatePassword } from '../api/auth.api';
 import { purgeAllCustomers } from '../api/customers';
+import { getCustomersPaged } from '../api/customers';
+import { getMembershipsPaged } from '../api/memberships';
 import { apiRequest } from '../api/client';
 
 type AdminSettingsMode = 'full' | 'general' | 'roles';
@@ -64,6 +66,8 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
   const [legacyCustomersRows, setLegacyCustomersRows] = useState<number>(0);
   const [legacyCustomersParsed, setLegacyCustomersParsed] = useState<unknown>(null);
   const [legacyDataImporting, setLegacyDataImporting] = useState(false);
+  const [exportingAllMemberships, setExportingAllMemberships] = useState(false);
+  const [exportingAllCustomers, setExportingAllCustomers] = useState(false);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogTitle, setDialogTitle] = useState('');
@@ -503,6 +507,163 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
     }
   };
 
+  function escapeCsvCell(value: string | number): string {
+    const s = String(value ?? '').replace(/"/g, '""');
+    return /[,"\n\r]/.test(s) ? `"${s}"` : s;
+  }
+
+  function downloadCsv(filename: string, headers: string[], rows: Array<Array<string | number>>) {
+    const csv = [headers.map(escapeCsvCell).join(','), ...rows.map((r) => r.map(escapeCsvCell).join(','))].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const handleExportAllCustomers = async () => {
+    if (exportingAllCustomers) return;
+    setExportingAllCustomers(true);
+    setMessage('');
+    setMessageType(null);
+    try {
+      const LIMIT = 500;
+      let page = 1;
+      let totalPages = 1;
+      const allRows: Array<{
+        id?: string;
+        membershipCardId?: string;
+        name?: string;
+        phone?: string;
+        email?: string;
+        primaryBranch?: string;
+        customerPackage?: string;
+        customerPackagePrice?: number;
+        customerPackageExpiry?: string;
+        notes?: string;
+        createdAt?: string;
+      }> = [];
+      do {
+        // eslint-disable-next-line no-await-in-loop
+        const r = await getCustomersPaged({ page, limit: LIMIT });
+        if (!r.success || !r.customers) throw new Error(r.message || 'Failed to export all customers.');
+        allRows.push(...(r.customers as typeof allRows));
+        totalPages = r.pages ?? 1;
+        page += 1;
+      } while (page <= totalPages);
+
+      const headers = ['ID', 'Card ID', 'Name', 'Phone', 'Email', 'Primary Branch', 'Package', 'Package Price', 'Package Expiry', 'Notes', 'Created At'];
+      const rows = allRows.map((c) => [
+        c.id ?? '',
+        c.membershipCardId ?? '',
+        c.name ?? '',
+        c.phone ?? '',
+        c.email ?? '',
+        c.primaryBranch ?? '',
+        c.customerPackage ?? '',
+        c.customerPackagePrice ?? '',
+        c.customerPackageExpiry ?? '',
+        c.notes ?? '',
+        c.createdAt ?? '',
+      ]);
+      downloadCsv(`customers-backup-all-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+      setMessageType('success');
+      setMessage(`Exported ${allRows.length} customer records.`);
+    } catch (err) {
+      setMessageType('error');
+      setMessage(err instanceof Error ? err.message : 'Failed to export all customers.');
+    } finally {
+      setExportingAllCustomers(false);
+    }
+  };
+
+  const handleExportAllMemberships = async () => {
+    if (exportingAllMemberships) return;
+    setExportingAllMemberships(true);
+    setMessage('');
+    setMessageType(null);
+    try {
+      const LIMIT = 500;
+      let page = 1;
+      let totalPages = 1;
+      const allRows: Array<{
+        id?: string;
+        customer?: { id?: string; name?: string; phone?: string; email?: string; membershipCardId?: string } | null;
+        packageName?: string;
+        typeName?: string;
+        totalCredits?: number;
+        usedCredits?: number;
+        remainingCredits?: number;
+        soldAtBranch?: string;
+        soldAtBranchId?: string;
+        purchaseDate?: string;
+        expiryDate?: string;
+        status?: string;
+        packagePrice?: number;
+        discountAmount?: number;
+      }> = [];
+      do {
+        // eslint-disable-next-line no-await-in-loop
+        const r = await getMembershipsPaged({ page, limit: LIMIT });
+        if (!r.success || !r.memberships) throw new Error(r.message || 'Failed to export all memberships.');
+        allRows.push(...(r.memberships as typeof allRows));
+        totalPages = r.pages ?? 1;
+        page += 1;
+      } while (page <= totalPages);
+
+      const headers = [
+        'Membership ID',
+        'Customer ID',
+        'Customer Card ID',
+        'Customer Name',
+        'Customer Phone',
+        'Customer Email',
+        'Package Name',
+        'Type Name',
+        'Total Credits',
+        'Used Credits',
+        'Remaining Credits',
+        'Sold At Branch',
+        'Sold At Branch ID',
+        'Purchase Date',
+        'Expiry Date',
+        'Status',
+        'Package Price',
+        'Discount Amount',
+      ];
+      const rows = allRows.map((m) => [
+        m.id ?? '',
+        m.customer?.id ?? '',
+        m.customer?.membershipCardId ?? '',
+        m.customer?.name ?? '',
+        m.customer?.phone ?? '',
+        m.customer?.email ?? '',
+        m.packageName ?? '',
+        m.typeName ?? '',
+        m.totalCredits ?? '',
+        m.usedCredits ?? '',
+        m.remainingCredits ?? '',
+        m.soldAtBranch ?? '',
+        m.soldAtBranchId ?? '',
+        m.purchaseDate ?? '',
+        m.expiryDate ?? '',
+        m.status ?? '',
+        m.packagePrice ?? '',
+        m.discountAmount ?? '',
+      ]);
+      downloadCsv(`memberships-backup-all-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+      setMessageType('success');
+      setMessage(`Exported ${allRows.length} membership records.`);
+    } catch (err) {
+      setMessageType('error');
+      setMessage(err instanceof Error ? err.message : 'Failed to export all memberships.');
+    } finally {
+      setExportingAllMemberships(false);
+    }
+  };
+
   const openDialog = (action: NonNullable<typeof dialogAction>) => {
     if (action === 'importCustomers') {
       setDialogTitle('Import legacy customers?');
@@ -927,6 +1088,33 @@ export default function AdminSettings({ mode = 'full' }: { mode?: AdminSettingsM
                 </button>
               </form>
             )}
+          </div>
+
+          <div className="settings-block settings-block-divider">
+            <h3 className="settings-block-heading">Emergency backup export (full data)</h3>
+            <p className="settings-block-desc">
+              Download complete backups directly from Settings. These exports include all pages of data (not just the 100 rows shown on list screens).
+            </p>
+            <div className="settings-form">
+              <div className="settings-btn-row">
+                <button
+                  type="button"
+                  className="settings-btn settings-btn-primary"
+                  onClick={handleExportAllMemberships}
+                  disabled={exportingAllMemberships || exportingAllCustomers}
+                >
+                  {exportingAllMemberships ? 'Exporting…' : 'Export All memberships'}
+                </button>
+                <button
+                  type="button"
+                  className="settings-btn settings-btn-primary"
+                  onClick={handleExportAllCustomers}
+                  disabled={exportingAllCustomers || exportingAllMemberships}
+                >
+                  {exportingAllCustomers ? 'Exporting…' : 'Export All Customers'}
+                </button>
+              </div>
+            </div>
           </div>
 
           {mode === 'full' && (

@@ -12,6 +12,7 @@ export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -57,7 +58,7 @@ export default function CustomersPage() {
       const p = opts?.page ?? page;
       const s = opts?.search ?? searchQuery;
       const b = opts?.branchId ?? branchFilterId;
-      if (customers.length === 0) setLoading(true);
+      if (!hasLoadedOnce) setLoading(true);
       else setRefreshing(true);
       setError('');
       getCustomersPaged({
@@ -68,6 +69,7 @@ export default function CustomersPage() {
       }).then((r) => {
         setLoading(false);
         setRefreshing(false);
+        setHasLoadedOnce(true);
         if (r.success && r.customers) {
           setCustomers(r.customers);
           setCustomersTotal(r.total ?? r.customers.length);
@@ -75,7 +77,7 @@ export default function CustomersPage() {
         } else setError(r.message || 'Failed to load');
       });
     },
-    [PAGE_SIZE, branchFilterId, isAdmin, page, searchQuery, customers.length]
+    [PAGE_SIZE, branchFilterId, isAdmin, page, searchQuery, hasLoadedOnce]
   );
 
   useEffect(() => {
@@ -218,6 +220,28 @@ export default function CustomersPage() {
     } else setError((res as { message?: string }).message || 'Failed to create');
   }
 
+  function handleOpenAddCustomerFromSearch() {
+    const q = searchQuery.trim();
+    if (!q) {
+      setShowForm(true);
+      return;
+    }
+    const onlyDigits = q.replace(/\D/g, '');
+    const hasLetters = /[a-zA-Z]/.test(q);
+    if (!hasLetters && onlyDigits.length >= 7) {
+      setPhone(onlyDigits);
+      setName('');
+    } else {
+      setName(q);
+      setPhone('');
+    }
+    setShowForm(true);
+    setTimeout(() => {
+      const formEl = document.querySelector('.auth-form');
+      if (formEl instanceof HTMLElement) formEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }
+
   function escapeCsvCell(value: string): string {
     const s = String(value ?? '').replace(/"/g, '""');
     return /[,"\n\r]/.test(s) ? `"${s}"` : s;
@@ -298,7 +322,7 @@ export default function CustomersPage() {
     URL.revokeObjectURL(url);
   }
 
-  if (loading && customers.length === 0) {
+  if (loading && !hasLoadedOnce) {
     return (
       <div className="dashboard-content">
         <div className="vendors-loading"><div className="spinner" /><span>Loading customers...</span></div>
@@ -428,65 +452,65 @@ export default function CustomersPage() {
           </form>
         )}
         {error && <div className="auth-error vendors-error">{error}</div>}
+        <div className="customers-filters">
+          {isAdmin && (
+            <label>
+              <span>Branch</span>
+              <select
+                value={branchFilterId}
+                onChange={(e) => setBranchFilterId(e.target.value)}
+                aria-label="Filter customers by branch"
+              >
+                <option value="">All customers</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <div className="customers-search-group">
+            <label className="customers-search-label">
+              <span>Search by Card ID, name, phone or email</span>
+              <input
+                type="search"
+                className="customers-search-input"
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                aria-label="Search customers by card ID, name, phone or email"
+              />
+            </label>
+            <button type="button" className="customers-search-btn" onClick={() => document.querySelector<HTMLInputElement>('.customers-search-input')?.focus()}>
+              Search
+            </button>
+          </div>
+          {canExportCustomers && (
+            <button
+              type="button"
+              className="customers-export-btn"
+              onClick={exportToCsv}
+              disabled={totalFiltered === 0}
+              title={totalFiltered === 0 ? 'No data to export' : 'Export filtered customers to CSV/Excel'}
+            >
+              Export to CSV / Excel
+            </button>
+          )}
+          {showImportButton && (
+            <label className="customers-import-btn customers-import-btn-inline">
+              <input
+                type="file"
+                accept=".json,application/json"
+                className="customers-import-input"
+                aria-label="Import customers from JSON"
+                onChange={handleImportFile}
+                disabled={importing}
+              />
+              {importing ? 'Importing…' : 'Import from JSON'}
+            </label>
+          )}
+        </div>
         {customers.length > 0 ? (
           <>
-            <div className="customers-filters">
-              {isAdmin && (
-                <label>
-                  <span>Branch</span>
-                  <select
-                    value={branchFilterId}
-                    onChange={(e) => setBranchFilterId(e.target.value)}
-                    aria-label="Filter customers by branch"
-                  >
-                    <option value="">All customers</option>
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <div className="customers-search-group">
-                <label className="customers-search-label">
-                  <span>Search by Card ID, name, phone or email</span>
-                  <input
-                    type="search"
-                    className="customers-search-input"
-                    placeholder="Search..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    aria-label="Search customers by card ID, name, phone or email"
-                  />
-                </label>
-                <button type="button" className="customers-search-btn" onClick={() => document.querySelector<HTMLInputElement>('.customers-search-input')?.focus()}>
-                  Search
-                </button>
-              </div>
-              {canExportCustomers && (
-                <button
-                  type="button"
-                  className="customers-export-btn"
-                  onClick={exportToCsv}
-                  disabled={totalFiltered === 0}
-                  title={totalFiltered === 0 ? 'No data to export' : 'Export filtered customers to CSV/Excel'}
-                >
-                  Export to CSV / Excel
-                </button>
-              )}
-              {showImportButton && (
-                <label className="customers-import-btn customers-import-btn-inline">
-                  <input
-                    type="file"
-                    accept=".json,application/json"
-                    className="customers-import-input"
-                    aria-label="Import customers from JSON"
-                    onChange={handleImportFile}
-                    disabled={importing}
-                  />
-                  {importing ? 'Importing…' : 'Import from JSON'}
-                </label>
-              )}
-            </div>
             {totalFiltered > 0 && (
               <p className="customers-showing-count text-muted">
                 Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, totalFiltered)} of {totalFiltered} customer{totalFiltered !== 1 ? 's' : ''}
@@ -686,17 +710,25 @@ export default function CustomersPage() {
                 </button>
               </div>
             )}
-            {filteredCustomers.length === 0 && (
-              <p className="vendors-empty">
-                {searchQuery.trim()
-                  ? `No customers match "${searchQuery.trim()}".`
-                  : branchFilterId
-                    ? `No customers in this branch.`
-                    : 'No customers.'}
-              </p>
+          </>
+        ) : !showForm && (
+          <>
+            <p className="vendors-empty">
+              {searchQuery.trim()
+                ? `No customers match "${searchQuery.trim()}".`
+                : branchFilterId
+                  ? 'No customers in this branch.'
+                  : 'No customers. Add a customer, then assign package and membership from the Memberships page.'}
+            </p>
+            {searchQuery.trim() && (
+              <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.75rem' }}>
+                <button type="button" className="auth-submit" style={{ width: 'auto' }} onClick={handleOpenAddCustomerFromSearch}>
+                  Add customer "{searchQuery.trim()}"
+                </button>
+              </div>
             )}
           </>
-        ) : !showForm && <p className="vendors-empty">No customers. Add a customer, then assign package and membership from the Memberships page.</p>}
+        )}
       </section>
     </div>
   );

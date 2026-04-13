@@ -1298,7 +1298,6 @@ export default function MembershipsList() {
             <option value="">All statuses</option>
             <option value="active">Active</option>
             <option value="used">Used</option>
-            <option value="expired">Expired</option>
           </select>
           <label className="memberships-date-filter-label">
             <span>From (date taken)</span>

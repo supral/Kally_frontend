@@ -56,9 +56,8 @@ export default function SalesImagesPage() {
   const [savingCount, setSavingCount] = useState(false);
   const [countError, setCountError] = useState('');
   const [showUpload, setShowUpload] = useState(false);
-  const [uploadTitle, setUploadTitle] = useState('');
-  const [uploadDescription, setUploadDescription] = useState('');
   const [uploadDate, setUploadDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [uploadSalesCount, setUploadSalesCount] = useState('');
   const [uploadSalesAmount, setUploadSalesAmount] = useState('');
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -164,13 +163,12 @@ export default function SalesImagesPage() {
   }, [viewDetail]);
 
   function handleExport() {
-    const headers = ['Title', ...(isAdmin ? ['Branch'] : []), 'Date', 'Description', 'Sales count', 'Amount'];
+    const headers = [...(isAdmin ? ['Branch'] : []), 'Date', 'Sales count', 'Amount'];
     const rows = filteredImages.map((img) => {
       const dateStr = new Date(img.date).toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
-      const desc = (img.description ?? '').replace(/"/g, '""');
       const count = img.manualSalesCount ?? img.salesCount ?? 0;
       const amount = (img.salesAmount != null && img.salesAmount > 0) ? String(img.salesAmount) : '';
-      const base = [img.title, ...(isAdmin ? [img.branchName ?? ''] : []), dateStr, `"${desc}"`, String(count), amount];
+      const base = [...(isAdmin ? [img.branchName ?? ''] : []), dateStr, String(count), amount];
       return base.join(',');
     });
     const csv = [headers.join(','), ...rows].join('\r\n');
@@ -213,10 +211,6 @@ export default function SalesImagesPage() {
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     setUploadError('');
-    if (!uploadTitle.trim()) {
-      setUploadError('Title is required.');
-      return;
-    }
     if (!uploadDate) {
       setUploadError('Date is required.');
       return;
@@ -246,21 +240,26 @@ export default function SalesImagesPage() {
       setUploading(false);
       return;
     }
+    const countRaw = uploadSalesCount.trim();
+    const countNum = countRaw === '' ? null : Number(countRaw);
+    if (countNum != null && (!Number.isInteger(countNum) || countNum < 0)) {
+      setUploadError('Sales count must be a non-negative integer.');
+      return;
+    }
     const amountNum = uploadSalesAmount.trim() === '' ? null : Number(uploadSalesAmount);
     const r = await createSalesImage({
-      title: uploadTitle.trim(),
-      description: uploadDescription.trim() || undefined,
+      title: `Sales Data ${uploadDate}`,
       date: uploadDate,
       imageBase64s,
+      ...(countNum != null ? { manualSalesCount: countNum } : {}),
       ...(amountNum != null && !Number.isNaN(amountNum) && amountNum >= 0 ? { salesAmount: amountNum } : {}),
       ...(isAdmin && branchFilter ? { branchId: branchFilter } : {}),
     });
     setUploading(false);
     if (r.success) {
       setShowUpload(false);
-      setUploadTitle('');
-      setUploadDescription('');
       setUploadDate(new Date().toISOString().slice(0, 10));
+      setUploadSalesCount('');
       setUploadSalesAmount('');
       setUploadFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -409,32 +408,24 @@ export default function SalesImagesPage() {
           <form onSubmit={handleUpload} className="sales-images-upload-form">
             <div className="sales-images-upload-fields">
               <div className="sales-images-field">
-                <label htmlFor="si-title">Title</label>
-                <input
-                  id="si-title"
-                  type="text"
-                  value={uploadTitle}
-                  onChange={(e) => setUploadTitle(e.target.value)}
-                  placeholder="e.g. Daily sales Feb 23"
-                />
-              </div>
-              <div className="sales-images-field sales-images-field-full">
-                <label htmlFor="si-description">Description (optional)</label>
-                <textarea
-                  id="si-description"
-                  value={uploadDescription}
-                  onChange={(e) => setUploadDescription(e.target.value)}
-                  placeholder="e.g. Notes about this day's sales"
-                  rows={2}
-                />
-              </div>
-              <div className="sales-images-field">
                 <label htmlFor="si-date">Date</label>
                 <input
                   id="si-date"
                   type="date"
                   value={uploadDate}
                   onChange={(e) => setUploadDate(e.target.value)}
+                />
+              </div>
+              <div className="sales-images-field">
+                <label htmlFor="si-sales-count">Sales count</label>
+                <input
+                  id="si-sales-count"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={uploadSalesCount}
+                  onChange={(e) => setUploadSalesCount(e.target.value)}
+                  placeholder="e.g. 12"
                 />
               </div>
               <div className="sales-images-field">
@@ -589,10 +580,8 @@ export default function SalesImagesPage() {
           <table className="sales-images-table">
             <thead>
               <tr>
-                <th>Title</th>
                 {isAdmin && <th>Branch</th>}
                 <th>Date</th>
-                <th>Description</th>
                 <th>Sales count</th>
                 <th>Amount</th>
                 <th className="th-actions">View</th>
@@ -607,10 +596,8 @@ export default function SalesImagesPage() {
                   tabIndex={0}
                   onKeyDown={(e) => e.key === 'Enter' && handleView(img.id)}
                 >
-                  <td><strong>{img.title}</strong></td>
                   {isAdmin && <td><span className="sales-images-table-badge">{img.branchName}</span></td>}
                   <td>{new Date(img.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</td>
-                  <td className="sales-images-table-desc">{(img.description != null && img.description !== '') ? img.description : '—'}</td>
                   <td>{img.manualSalesCount ?? img.salesCount}{img.manualSalesCount != null ? ' (manual)' : ''}</td>
                   <td>{(img.salesAmount != null && img.salesAmount > 0) ? formatCurrency(img.salesAmount) : '—'}</td>
                   <td className="branch-actions">

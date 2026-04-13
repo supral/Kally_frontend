@@ -4930,6 +4930,22 @@
   max-width: 420px;
 }
 
+/* Lead Inbox book-appointment modal uses separate backdrop + modal nodes. */
+.appointment-modal-backdrop {
+  background: transparent;
+}
+
+.lead-book-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 301;
+  width: min(420px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+
 .appointment-book-form {
   padding: 1rem 1.25rem 1.5rem;
 }
@@ -6183,6 +6199,10 @@
   z-index: 300;
   padding: 1rem;
   animation: fadeIn 0.2s ease;
+}
+
+.vendor-modal-backdrop.appointment-modal-backdrop {
+  background: transparent !important;
 }
 
 

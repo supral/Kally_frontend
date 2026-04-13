@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { getMembership, recordMembershipUsage, renewMembership, deleteMembershipUsage } from '../../../api/memberships';
 import { getBranches } from '../../../api/branches';
+import { getPackages, type PackageItem } from '../../../api/packages';
 import { getSettings } from '../../../api/settings';
 import { useAuth } from '../../../auth/hooks/useAuth';
 import { formatCurrency } from '../../../utils/money';
 import type { Membership, MembershipUsage } from '../../../types/common';
 import type { Branch } from '../../../types/crm';
+import MembershipPackageCombobox from '../components/MembershipPackageCombobox';
 
 export default function MembershipDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -24,7 +26,8 @@ export default function MembershipDetailPage() {
   const [branchesLoading, setBranchesLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [renewing, setRenewing] = useState(false);
-  const [renewCredits, setRenewCredits] = useState('');
+  const [packages, setPackages] = useState<PackageItem[]>([]);
+  const [renewPackageId, setRenewPackageId] = useState('');
   const [usageDeleteId, setUsageDeleteId] = useState<string | null>(null);
   const [usageDeleting, setUsageDeleting] = useState(false);
   const [showDeleteMembershipUsageToAdmin, setShowDeleteMembershipUsageToAdmin] = useState(true);
@@ -58,11 +61,19 @@ export default function MembershipDetailPage() {
         setMembership(m);
         setUsageHistory(r.usageHistory || []);
         if (m && (m.status === 'expired' || m.status === 'used')) {
-          setRenewCredits(String(m.totalCredits));
+          setRenewPackageId('');
         }
       } else setError(r.message || 'Failed to load');
     });
   }, [id]);
+
+  useEffect(() => {
+    getPackages(false).then((r) => {
+      if (r.success && r.packages) setPackages(r.packages || []);
+    });
+  }, []);
+
+  const selectedRenewPackage = packages.find((p) => String(p.id) === String(renewPackageId));
 
   useEffect(() => {
     setBranchesLoading(true);
@@ -113,16 +124,14 @@ export default function MembershipDetailPage() {
   async function handleRenew(e: React.FormEvent) {
     e.preventDefault();
     if (!id || !membership) return;
-    const credits = renewCredits.trim() ? parseInt(renewCredits, 10) : membership.totalCredits;
-    if (Number.isNaN(credits) || credits < 1) {
-      setError('Total credits must be at least 1.');
+    if (!renewPackageId || !selectedRenewPackage) {
+      setError('Please select a package to renew.');
       return;
     }
     setRenewing(true);
     setError('');
     const res = await renewMembership(id, {
-      packagePrice: 0,
-      totalCredits: credits,
+      packageId: renewPackageId,
     });
     setRenewing(false);
     if (res.success && res.membership) {
@@ -228,11 +237,25 @@ export default function MembershipDetailPage() {
             </div>
             <form onSubmit={handleRenew} className="membership-renew-form">
               <h4 className="membership-renew-form-title">Renew membership</h4>
-              <p className="membership-renew-form-desc">Set total credits for the renewal.</p>
+              <p className="membership-renew-form-desc">Choose a package for renewal. Credits and price update automatically.</p>
               {error && <div className="auth-error">{error}</div>}
               <label>
+                <span>Package</span>
+                <MembershipPackageCombobox
+                  packages={packages}
+                  packageId={renewPackageId}
+                  onPackageIdChange={setRenewPackageId}
+                  disabled={renewing}
+                  inputClassName="settings-input"
+                />
+              </label>
+              <label>
                 <span>Total credits</span>
-                <input type="number" min={1} value={renewCredits} onChange={(e) => setRenewCredits(e.target.value)} placeholder={String(membership!.totalCredits)} required />
+                <input type="text" value={selectedRenewPackage ? String(selectedRenewPackage.totalSessions ?? 1) : '—'} readOnly className="readonly-input" />
+              </label>
+              <label>
+                <span>Package price</span>
+                <input type="text" value={selectedRenewPackage ? formatCurrency(selectedRenewPackage.price) : '—'} readOnly className="readonly-input" />
               </label>
               <button type="submit" className="auth-submit" disabled={renewing}>{renewing ? 'Renewing…' : 'Renew'}</button>
             </form>

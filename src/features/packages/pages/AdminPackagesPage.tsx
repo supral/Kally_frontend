@@ -312,7 +312,7 @@ export default function AdminPackagesPage() {
     setImporting(false);
   }
 
-  if (loading) {
+  if (loading && packages.length === 0) {
     return (
       <div className="dashboard-content">
         <div className="vendors-loading"><div className="spinner" /><span>Loading packages...</span></div>
@@ -443,23 +443,26 @@ export default function AdminPackagesPage() {
       )}
 
       <section className="content-card packages-page-table-card">
+        <div className="packages-page-header-row">
+          <p className="packages-page-count text-muted">
+            {packagesTotal > 0
+              ? `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, packagesTotal)} of ${packagesTotal} package${packagesTotal !== 1 ? 's' : ''}`
+              : `Showing 0 of 0 packages`}
+          </p>
+          <div className="packages-page-search">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+              placeholder="Search packages by name, sessions, or status…"
+              className="settings-input"
+              style={{ maxWidth: 260 }}
+            />
+          </div>
+        </div>
+
         {packages.length > 0 ? (
           <>
-            <div className="packages-page-header-row">
-              <p className="packages-page-count text-muted">
-                Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, packagesTotal)} of {packagesTotal} package{packagesTotal !== 1 ? 's' : ''}
-              </p>
-              <div className="packages-page-search">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
-                  placeholder="Search packages by name, sessions, or status…"
-                  className="settings-input"
-                  style={{ maxWidth: 260 }}
-                />
-              </div>
-            </div>
             {/* Mobile: card list */}
             <div className="packages-mobile-cards">
               {editingId && canShowPackageActions && (
@@ -706,7 +709,7 @@ export default function AdminPackagesPage() {
               </div>
             )}
           </>
-        ) : !showForm && (
+        ) : !showForm && !loading && (
           <p className="packages-page-empty text-muted">
             {isAdmin ? 'No packages yet. Add one so vendors can assign packages to customers.' : 'No packages yet.'}
           </p>
